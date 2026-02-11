@@ -1,0 +1,10 @@
+*.db
+__pycache__
+credentials.json
+jsonl_file_folder/
+token.json
+trash_can/
+processing batch list.txt
+xgb_model.json
+lab-email
+reply-style.xml

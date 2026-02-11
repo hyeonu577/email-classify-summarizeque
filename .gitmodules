@@ -1,0 +1,9 @@
+[submodule "true_calendar"]
+	path = true_calendar
+	url = https://github.com/hyeonu577/true-calendar.git
+[submodule "true_email"]
+	path = true_email
+	url = https://github.com/hyeonu577/true-email.git
+[submodule "true_line"]
+	path = true_line
+	url = https://github.com/hyeonu577/true-line.git
