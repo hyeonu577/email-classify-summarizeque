@@ -30,6 +30,7 @@ from email.message import EmailMessage
 import numpy as np
 import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
+from pathlib import Path
 from dotenv import load_dotenv
 
 
@@ -472,12 +473,7 @@ def extract_image_urls(text):
 
 
 def get_current_path():
-    folder_path = '/python/email_classify_summarizeque/'
-    folder_exists = os.path.exists(folder_path)
-    if folder_exists:
-        return folder_path
-    else:
-        return ''
+    return Path(__file__).resolve().parent
 
 
 def get_db_path():

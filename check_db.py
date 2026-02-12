@@ -1,11 +1,12 @@
 import os
 import sqlite3
 import hashlib
+from pathlib import Path
 from datetime import datetime, timedelta
 
 def get_db_path():
     """데이터베이스 경로 반환"""
-    return os.path.join(os.path.dirname(__file__), "checked_items.db")
+    return os.path.join(Path(__file__).resolve().parent, "checked_items.db")
 
 def print_items():
     """

@@ -5,6 +5,7 @@ import datetime
 import openai
 from true_email import true_email
 import re
+from pathlib import Path
 from dotenv import load_dotenv
 
 
@@ -79,12 +80,7 @@ def get_openai_client():
 
 
 def get_current_path():
-    folder_path = '/python/email_classify_summarizeque/'
-    folder_exists = os.path.exists(folder_path)
-    if folder_exists:
-        return folder_path
-    else:
-        return ''
+    return Path(__file__).resolve().parent
 
 
 def get_trash_mail_list():  # 모든 이메일 dictionary가 담겨있는 list 반환
