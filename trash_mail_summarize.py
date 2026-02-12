@@ -85,7 +85,12 @@ def get_current_path():
 
 def get_trash_mail_list():  # 모든 이메일 dictionary가 담겨있는 list 반환
     parsed_data_list = []
-    trash_can_path = f'{get_current_path()}trash_can'
+    trash_can_path = os.path.join(get_current_path(), 'trash_can')
+
+    if not os.path.exists(trash_can_path):
+        os.makedirs(trash_can_path, exist_ok=True)
+        return []
+    
     for filename in os.listdir(trash_can_path):
         if filename.endswith('.json'):
             file_path = os.path.join(trash_can_path, filename)
@@ -188,8 +193,12 @@ def generate_each_line_of_batch_file(email):  # jsonl 파일의 각 줄을 만�
 def generate_batch_file_with_trash_mail_list(trash_mail_list):  # batch 작업 들어가지 않은 이메일 list를 주면 batch 파일 만드는 함수
     jsonl_data = [generate_each_line_of_batch_file(each_trash_mail) for each_trash_mail in trash_mail_list]
 
+    folder_path = f"{get_current_path()}jsonl_file_folder"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path, exist_ok=True)
+
     jsonl_file_name = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    jsonl_file_path = f"{get_current_path()}jsonl_file_folder/{jsonl_file_name}.jsonl"
+    jsonl_file_path = f"{folder_path}/{jsonl_file_name}.jsonl"
     with jsonlines.open(jsonl_file_path, mode="w") as writer:
         writer.write_all(jsonl_data)
     print(f'generated batch file: {jsonl_file_path}')

@@ -543,7 +543,10 @@ def get_checked_item_list():
 
 def save_trash(dictionary_):
     current_path = get_current_path()
-    with open(f'{current_path}trash_can/{dictionary_["hash"]}.json', 'w', encoding='utf-8') as f:
+    trash_can_path = f'{current_path}trash_can'
+    if not os.path.exists(trash_can_path):
+        os.makedirs(trash_can_path, exist_ok=True)
+    with open(f'{trash_can_path}/{dictionary_["hash"]}.json', 'w', encoding='utf-8') as f:
         json.dump(dictionary_, f, indent=4, ensure_ascii=False)
 
 

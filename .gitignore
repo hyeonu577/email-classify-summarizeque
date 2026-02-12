@@ -5,6 +5,6 @@ jsonl_file_folder/
 token.json
 trash_can/
 processing batch list.txt
-xgb_model.json
-lab-email
+xgb_model_*.json
+lab-email-address
 reply-style.xml
