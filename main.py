@@ -473,7 +473,7 @@ def extract_image_urls(text):
 
 
 def get_current_path():
-    return Path(__file__).resolve().parent
+    return f'{Path(__file__).resolve().parent}/'
 
 
 def get_db_path():

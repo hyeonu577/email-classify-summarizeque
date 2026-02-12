@@ -80,7 +80,7 @@ def get_openai_client():
 
 
 def get_current_path():
-    return Path(__file__).resolve().parent
+    return f'{Path(__file__).resolve().parent}/'
 
 
 def get_trash_mail_list():  # 모든 이메일 dictionary가 담겨있는 list 반환
