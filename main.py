@@ -185,7 +185,7 @@ def get_embedding(text, model="text-embedding-3-large"):
     return result.data[0].embedding
 
 
-def classify_email(email_subject, email_body):
+def classify_email(email_subject, email_body, classify_type='all'):
     """
     이메일 제목과 본문을 받아서 카테고리를 분류하는 함수
 
@@ -199,20 +199,20 @@ def classify_email(email_subject, email_body):
     full_text = f"<title>{email_subject}</title>\n<body>{email_body}</body>"
     embedding_vector = get_embedding(full_text)
 
-    reward_keywords = ['기프티콘', '상품권', '쿠폰', '보상', '사례금', '사례비', '인건비']
-    has_reward = 1 if any(keyword in full_text for keyword in reward_keywords) else 0
+    if classify_type == 'all':
+        reward_keywords = ['기프티콘', '상품권', '쿠폰', '보상', '사례금', '사례비', '인건비']
+        has_reward = 1 if any(keyword in full_text for keyword in reward_keywords) else 0
+        X = np.array(embedding_vector + [has_reward]).reshape(1, -1)
+    else:
+        X = np.array(embedding_vector).reshape(1, -1)
 
-    X = np.array(embedding_vector + [has_reward]).reshape(1, -1)
-
-    # JSON 형식으로 모델 로드
     model = xgb.XGBClassifier()
-    model.load_model(f'{get_current_path()}xgb_model.json')
+    model.load_model(f'{get_current_path()}xgb_model_{classify_type}.json')
 
-    # JSON 형식으로 라벨 인코더 로드
     with open(f'{get_current_path()}label_encoder.json', 'r', encoding='utf-8') as f:
         label_data = json.load(f)
     le = LabelEncoder()
-    le.classes_ = np.array(label_data['classes'])
+    le.classes_ = np.array(label_data[classify_type])
 
     y_pred = model.predict(X)[0]
     y_pred_proba = model.predict_proba(X)[0]
@@ -716,18 +716,18 @@ def finalize_summary(to_be_finalized_email, given_summary):
     else:
         due_date = 'today'
     sender, _, _ = extract_name_and_email(to_be_finalized_email['sender'])
+
+    header = f'[{to_be_finalized_email["category"]}'
+    header += f': {to_be_finalized_email["lab category"]}]' if to_be_finalized_email['category'] == '연구실' else ']'
+    header += '[CC]' if not to_be_finalized_email['to_me'] else ''
+    header += f' {to_be_finalized_email["subject"]}'
     
 
-    if (to_be_finalized_email["category"] == '연구실') and (not to_be_finalized_email['to_me']):  # 연구실 CC
-        true_email.self_email(f'[{to_be_finalized_email["category"]}][CC] {to_be_finalized_email["subject"]}',
-                              f'{sender}\n\n{given_summary}\n\n\n{to_be_finalized_email["body"]}')
-    else:
-        true_email.self_email(f'[{to_be_finalized_email["category"]}] {to_be_finalized_email["subject"]}',
-                              f'{sender}\n\n{given_summary}\n\n\n{to_be_finalized_email["body"]}')
+    true_email.self_email(header, f'{sender}\n\n{given_summary}\n\n\n{to_be_finalized_email["body"]}')
         
 
     if (to_be_finalized_email["category"] in ['답장', '멘션', '연구실', '기프티콘']) and to_be_finalized_email['to_me']:
-        true_line.send_text(f'{to_be_finalized_email["subject"]}\n\n{sender}\n\n{given_summary}')
+        true_line.send_text(f'{header}\n\n{sender}\n\n{given_summary}')
 
 
     if to_be_finalized_email["category"] in ['연주회', '연구실']:
@@ -747,7 +747,7 @@ def finalize_summary(to_be_finalized_email, given_summary):
             description=f'{sender}\n\n{given_summary}'
         )
         add_todolist(
-            name=f'[{to_be_finalized_email["category"]}] {to_be_finalized_email["subject"]} 일정 검토',
+            name=f'{header} 일정 검토',
             description=f'{each_event.start_date_time}에 {each_event.title} 일정 생성함\n\n{sender}\n\n{given_summary}',
             due_date=due_date,
             priority=(3 if to_be_finalized_email['category'] == '연구실' and to_be_finalized_email['to_me'] else 2)
@@ -774,7 +774,7 @@ def finalize_summary(to_be_finalized_email, given_summary):
                         original_datetime=to_be_finalized_email['datetime'],
                         original_from_header=to_be_finalized_email['sender'])
             add_todolist(
-                    name=f'[{to_be_finalized_email["category"]}]{"[CC]" if not to_be_finalized_email['to_me'] else ""} {to_be_finalized_email["subject"]} 답장',
+                    name=f'{header} 답장',
                     description=f'답장 필요함.\n({reply_email.reason})\n\n{sender}\n\n{given_summary}',
                     due_date=due_date,
                     priority=4
@@ -790,14 +790,14 @@ def finalize_summary(to_be_finalized_email, given_summary):
             else:
                 priority = 2
             add_todolist(
-                name=f'[{to_be_finalized_email["category"]}] {to_be_finalized_email["subject"]}',
+                name=header,
                 description=f'{sender}\n\n{given_summary}',
                 due_date=due_date,
                 priority=priority
             )
         elif to_be_finalized_email["category"] == '연구실':
             add_todolist(
-                name=f'[{to_be_finalized_email["category"]}][CC] {to_be_finalized_email["subject"]}',
+                name=header,
                 description=f'{sender}\n\n{given_summary}',
                 due_date=due_date,
                 priority=2
@@ -1006,6 +1006,10 @@ if __name__ == "__main__":
                     classify_result = '답장'
                 elif am_mentioned(each_email):
                     classify_result = '멘션'
+        
+        if classify_result == '연구실':
+            lab_classify, _ = classify_email(each_email['subject'], each_email['body'], classify_type='lab')
+            each_email['lab category'] = lab_classify
                     
         print(f'[{classify_result}] {each_email["subject"]}\n')
         if classify_result == 'TRASH':
