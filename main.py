@@ -578,7 +578,7 @@ def am_mentioned(email_):
 def is_lab_mail(email_):
     all_addresses = list(email_['receiver'])
     all_addresses.append(email_['sender'])
-    with open(f'{get_current_path()}lab-email', 'r', encoding='utf-8') as file:
+    with open(f'{get_current_path()}lab-email-address', 'r', encoding='utf-8') as file:
             lines = file.readlines()
             lab_addresses = [line.strip() for line in lines if line.strip()]
     return any(lab_add in receive_add for lab_add in lab_addresses for receive_add in all_addresses)
