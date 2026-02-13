@@ -732,7 +732,10 @@ def finalize_email(to_be_finalized_email, given_summary):
         true_line.send_text(f'{header}\n\n{sender}\n\n{given_summary}')
 
 
-    event_list = extract_event_info(to_be_finalized_email['subject'], to_be_finalized_email['body'])
+    if to_be_finalized_email["category"] in ['연주회', '연구실']:
+        event_list = extract_event_info(to_be_finalized_email['subject'], to_be_finalized_email['body'])
+    else:
+        event_list = []
     no_valid_event = True
     for each_event in event_list:
         print(f'일정 처리중: {each_event.title}\n{each_event.reason}')
