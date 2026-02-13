@@ -991,7 +991,9 @@ if __name__ == "__main__":
         each_email['hash'] = email_hash
 
         if each_email['subject'] == 'Temperature log':
-                classify_result = 'TRASH'
+            classify_result = 'TRASH'
+        elif 'healthchecks' in each_email['sender']:
+            classify_result = 'TRASH'
         else:
             classify_result, _ = classify_email(each_email['subject'], each_email['body'])
 
