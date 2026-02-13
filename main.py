@@ -707,7 +707,7 @@ def check_event_duplication(event):
 
 
 
-def finalize_summary(to_be_finalized_email, given_summary):
+def finalize_email(to_be_finalized_email, given_summary):
     print(f'{to_be_finalized_email["subject"]} 마무리 중')
 
     if datetime.datetime.now(ZoneInfo("Asia/Seoul")).hour >= 19:
@@ -717,7 +717,10 @@ def finalize_summary(to_be_finalized_email, given_summary):
     sender, _, _ = extract_name_and_email(to_be_finalized_email['sender'])
 
     header = f'[{to_be_finalized_email["category"]}'
-    header += f': {to_be_finalized_email["lab category"]}]' if to_be_finalized_email['category'] == '연구실' else ']'
+    if to_be_finalized_email['category'] == '연구실':
+        header += f': {to_be_finalized_email["lab category"]}]' if to_be_finalized_email["lab category"] != '중요' else ']'
+    else:
+        header += ']'
     header += '[CC]' if not to_be_finalized_email['to_me'] else ''
     header += f' {to_be_finalized_email["subject"]}'
     
@@ -725,14 +728,11 @@ def finalize_summary(to_be_finalized_email, given_summary):
     true_email.self_email(header, f'{sender}\n\n{given_summary}\n\n\n{to_be_finalized_email["body"]}')
         
 
-    if (to_be_finalized_email["category"] in ['답장', '멘션', '연구실', '기프티콘']) and to_be_finalized_email['to_me']:
+    if (to_be_finalized_email["category"] in ['답장', '멘션', '연구실', '기프티콘']) and to_be_finalized_email['to_me'] and to_be_finalized_email.get('lab category', '중요') == '중요':
         true_line.send_text(f'{header}\n\n{sender}\n\n{given_summary}')
 
 
-    if to_be_finalized_email["category"] in ['연주회', '연구실']:
-        event_list = extract_event_info(to_be_finalized_email['subject'], to_be_finalized_email['body'])
-    else:
-        event_list = []
+    event_list = extract_event_info(to_be_finalized_email['subject'], to_be_finalized_email['body'])
     no_valid_event = True
     for each_event in event_list:
         print(f'일정 처리중: {each_event.title}\n{each_event.reason}')
@@ -1041,7 +1041,7 @@ if __name__ == "__main__":
         else:
             summary = summarize_email_with_image(each_email['subject'], each_email['body'], image_description)
 
-        finalize_summary(each_email, summary)
+        finalize_email(each_email, summary)
 
     # 이미지 없는 이메일 요약
     for each_email in important_email_without_image_list:
@@ -1052,7 +1052,7 @@ if __name__ == "__main__":
         else:
             summary = summarize_email_without_image(each_email['subject'], each_email['body'])
 
-        finalize_summary(each_email, summary)
+        finalize_email(each_email, summary)
 
     print('email summarize complete')
     trash_mail_summarize.start_batch()
