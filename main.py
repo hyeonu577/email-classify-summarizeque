@@ -758,7 +758,6 @@ def finalize_summary(to_be_finalized_email, given_summary):
     if to_be_finalized_email["category"] in ['답장', '연구실', '수업', 'TA']:
         reply_email = generate_email_reply(to_be_finalized_email)
         if reply_email.is_reply_needed:
-            reply_needed = True
             cc = list(to_be_finalized_email['receiver'])
             cc.append(to_be_finalized_email['sender'])
             cc = [extract_name_and_email(each_address)[2] for each_address in cc[:] 
@@ -778,6 +777,7 @@ def finalize_summary(to_be_finalized_email, given_summary):
                     due_date=due_date,
                     priority=4
                 )
+            reply_needed = True
         
 
     if no_valid_event and not reply_needed:
@@ -800,6 +800,13 @@ def finalize_summary(to_be_finalized_email, given_summary):
                 description=f'{sender}\n\n{given_summary}',
                 due_date=due_date,
                 priority=2
+            )
+        else:
+            add_todolist(
+                name=header,
+                description=f'{sender}\n\n{given_summary}',
+                due_date=due_date,
+                priority=1
             )
 
     update_checked_item_list(to_be_finalized_email['hash'], to_be_finalized_email['subject'])
