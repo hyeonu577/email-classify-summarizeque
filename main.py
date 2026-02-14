@@ -13,7 +13,6 @@ from true_line import true_line
 import os
 import html2text
 import re
-from canvasapi import Canvas
 import json
 import trash_mail_summarize
 from todoist_api_python.api import TodoistAPI
