@@ -3,7 +3,7 @@ import email
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 import datetime
-from typing import Optional, List
+from typing import List
 from zoneinfo import ZoneInfo
 import openai
 import xxhash
@@ -17,7 +17,6 @@ import json
 import trash_mail_summarize
 from todoist_api_python.api import TodoistAPI
 from pydantic import BaseModel, Field
-from enum import Enum
 import sqlite3
 import os.path
 import base64
@@ -230,7 +229,7 @@ def classify_email(email_subject, email_body, classify_type='all'):
     return predicted_category, category_probs
 
 
-def summarize_email_without_image(email_subject, email_content):
+def summarize_email(email_subject, email_content, img_urls=[]):
     summarize_api_key = os.getenv('OPENAI_API_KEY_EMAIL')
     system_message = '''You are an expert in summarizing email content in Korean, but you may use terms in other languages if they are technical.
 
@@ -260,6 +259,10 @@ Using the provided email details, summarize the content in three sentences or fe
 
 (Ensure summaries are realistic in length and use meaningful placeholders.)'''
     message = f'제목: {email_subject}\n본문: {email_content}'
+    message = [{"type": "text", "text": message}]
+    if img_urls:
+        for each_img_url in img_urls:
+            message.append({"type": "image_url", "image_url": {"url": each_img_url}})
     try:
         client = openai.OpenAI(api_key=summarize_api_key)
         chat_completion = client.chat.completions.create(
@@ -274,6 +277,8 @@ Using the provided email details, summarize the content in three sentences or fe
         )
         return chat_completion.choices[0].message.content
     except Exception as e:
+        if img_urls:
+            return summarize_email(email_subject, email_content, img_urls=[])
         print(f"요약 중 에러 발생: {e}")
         return f"요약 중 에러 발생: {e}"
 
@@ -364,102 +369,6 @@ Summarize the provided email content into Korean.
         
         return response.output_text
 
-    except Exception as e:
-        print(f"요약 중 에러 발생: {e}")
-        return f"요약 중 에러 발생: {e}"
-
-
-def describe_image(img_urls):
-    image_description_api_key = os.getenv('OPENAI_API_KEY_EMAIL')
-    system_message = '''당신은 정보를 분석하고 정리하는 전문가입니다. 주어진 포스터 이미지에서 정보를 추출하여 정리하세요.
-포스터에 포함된 중요한 정보를 식별하고 정리하는 것이 목표입니다. 
-
-# Steps
-
-1. 포스터 이미지를 분석하여 잘 보이는 텍스트, 날짜, 시간, 장소 등의 정보를 확인합니다.
-2. 이벤트 또는 행사의 주제, 제목, 세부사항 등을 식별합니다.
-3. 주요 연락처 정보(예: 이메일, 전화번호)가 있다면 포함합니다.
-4. 모든 데이터를 정리하여 명확하게 제시합니다.
-
-# Output Format
-
-각 항목을 명시적으로 나열하여 정리합니다. 예:
-- 제목: [포스터의 제목]
-- 날짜: [이벤트 날짜]
-- 시간: [이벤트 시간]
-- 장소: [이벤트 장소]
-- 연락처: [이메일 또는 전화번호]
-- 추가 정보: [기타 중요한 정보]
-
-# Notes
-
-- 불명확한 정보를 상정하지 않고 명확하게 보이는 정보만 정리합니다.
-- 각 정보는 최대한 구체적으로 기록합니다.'''
-    user_message = []
-    for each_img_url in img_urls:
-        user_message.append({"type": "image_url", "image_url": {"url": each_img_url}})
-    try:
-        client = openai.OpenAI(api_key=image_description_api_key)
-        chat_completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_message}
-            ],
-            max_tokens=700,
-            temperature=0.3,
-            timeout=60.0,
-        )
-        img_info = chat_completion.choices[0].message.content
-        return img_info
-    except Exception as e:
-        print(f"설명 중 에러 발생: {e}")
-        return f"설명 중 에러 발생: {e}"
-
-
-def summarize_email_with_image(email_subject, email_body, img_info):
-    summarize_api_key = os.getenv('OPENAI_API_KEY_EMAIL')
-    system_message = '''You are an expert in summarizing email content in Korean, but you may use terms in other languages if they are technical.
-
-Using the provided email details, summarize the content in three sentences or fewer. Number each sentence for clarity.
-
-# Steps
-
-1. Read and understand the email subject, body, and any accompanying image descriptions.
-2. Identify key points and essential information from the email.
-3. Construct a concise summary that conveys the main message, ensuring relevance and coherence.
-4. Number each sentence in the summary for clarity.
-
-# Output Format
-
-- Three sentences or fewer, each sentence numbered (1, 2, 3). Ensure clarity and focus on the key points from the email content.
-
-# Examples
-
-**Input:** 
-- 제목: [Email Subject]
-- 본문: [Email Body]
-- 첨부 이미지 설명: [Image Info]
-
-**Output:** 
-1. [Summarized sentence one capturing a key point.]
-2. [Summarized sentence two covering additional important information.]
-3. [Optional summarized sentence three to complete the summary, if necessary.]
-
-(Ensure summaries are realistic in length and use meaningful placeholders.)'''
-    try:
-        client = openai.OpenAI(api_key=summarize_api_key)
-        chat_completion = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": f'\n제목:{email_subject}\n본문:{email_body}\n첨부 이미지 설명:{img_info}\n요약:'}
-            ],
-            max_tokens=500,
-            temperature=0.3,
-            timeout=60.0,
-        )
-        return chat_completion.choices[0].message.content
     except Exception as e:
         print(f"요약 중 에러 발생: {e}")
         return f"요약 중 에러 발생: {e}"
@@ -988,8 +897,7 @@ if __name__ == "__main__":
     print('start email classify')
     email_list = check_email()
     print('email read complete')
-    important_email_with_image_list = []
-    important_email_without_image_list = []
+    important_email_list = []
 
     # 분류
     for each_email in email_list:
@@ -1028,31 +936,16 @@ if __name__ == "__main__":
             continue
 
         each_email['category'] = classify_result
-        if extract_image_urls(each_email['body']) and not is_reply(each_email['subject']) and each_email['category'] != '연구실':
-            important_email_with_image_list.append(each_email)
-        else:
-            important_email_without_image_list.append(each_email)
-
-    # 이미지 있는 이메일 요약
-    for each_email in important_email_with_image_list:
-        image_urls = extract_image_urls(each_email['body'])
-        image_description = describe_image(image_urls)
-        print(f'{each_email["subject"]} 이미지 요약:\n{image_description}')
-        if '설명 중 에러 발생' in image_description:
-            summary = summarize_email_without_image(each_email['subject'], each_email['body'])
-        else:
-            summary = summarize_email_with_image(each_email['subject'], each_email['body'], image_description)
-
-        finalize_email(each_email, summary)
+        important_email_list.append(each_email)
 
     # 이미지 없는 이메일 요약
-    for each_email in important_email_without_image_list:
+    for each_email in important_email_list:
         if is_reply(each_email['subject']):
             summary = summarize_reply_email(each_email['subject'], each_email['body'])
         elif each_email['category'] == '연구실':
             summary = summarize_lab_email(each_email['subject'], each_email['body'])
         else:
-            summary = summarize_email_without_image(each_email['subject'], each_email['body'])
+            summary = summarize_email(each_email['subject'], each_email['body'], img_urls=extract_image_urls(each_email['body']))
 
         finalize_email(each_email, summary)
 
