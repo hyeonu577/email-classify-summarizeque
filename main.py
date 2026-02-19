@@ -666,7 +666,7 @@ def finalize_email(to_be_finalized_email, given_summary):
 
 
     reply_needed = False
-    if to_be_finalized_email["category"] in ['답장', '연구실', '수업', 'TA']:
+    if to_be_finalized_email["category"] in ['답장', '연구실', '수업', 'TA', '멘션']:
         reply_email = generate_email_reply(to_be_finalized_email)
         if reply_email.is_reply_needed:
             cc = list(to_be_finalized_email['receiver'])
