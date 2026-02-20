@@ -82,7 +82,7 @@ def delete_recent_items(days=2):
 if __name__ == "__main__":
     # for to_be_deleted_hash in ['caccbd0b8889b3066026015b2f59d189']:
     #     delete_item_by_hash(to_be_deleted_hash)
-    print_items()
-    delete_recent_items(days=2)
+    # print_items()
+    # delete_recent_items(days=2)
     print_items()
     

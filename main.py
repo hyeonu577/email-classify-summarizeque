@@ -776,24 +776,20 @@ def create_reply_draft(to_email, cc, subject, body, thread_id, original_message_
     
     try:
         reply_header = f"On {original_datetime}, {original_from_header} wrote:"
-        quote_prefix = "> " 
+        quote_prefix = "> "
         quoted_content = "\n".join([f"{quote_prefix}{line}" for line in original_content.splitlines()])
-        
-        full_body = f"{body}\n\n{reply_header}\n{quoted_content}"
-        
+
+        to_str = ', '.join(to_email) if isinstance(to_email, list) else to_email
+        cc_str = ', '.join(cc) if isinstance(cc, list) else (cc or '')
+
+        recipient_block = f"[수신인] {to_str}"
+        if cc_str:
+            recipient_block += f"\n[참조] {cc_str}"
+
+        full_body = f"{recipient_block}\n\n{body}\n\n{reply_header}\n{quoted_content}"
+
         message = EmailMessage()
         message.set_content(full_body)
-
-        if isinstance(to_email, list):
-            message['To'] = ', '.join(to_email)
-        else:
-            message['To'] = to_email
-
-        if cc:
-            if isinstance(cc, list):
-                message['Cc'] = ', '.join(cc)
-            else:
-                message['Cc'] = cc
         
         if not subject.lower().startswith('re:'):
             message['Subject'] = f"Re: {subject}"
@@ -884,7 +880,7 @@ def generate_email_reply(given_email):
         result: ReplyDecision = response.output_parsed
         
         # 결과 로그 출력 (확인용)
-        print(f"[분석 결과] 답장 필요: {result.is_reply_needed} / 이유: {result.reason}")
+        print(f"답장 필요: {result.is_reply_needed} / 이유: {result.reason}")
         
         return result
 
