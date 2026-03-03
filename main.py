@@ -40,6 +40,7 @@ _SKIP_SUBJECT = '[서울대학교] 인증코드(Verification Code) 발송'
 _SKIP_BODY_FRAGMENT = 'SYSTEM: System failed to mount external device [USB Disk 1] partition'
 _TRASH_SUBJECT_KEYWORDS = ['Temperature log']
 _TRASH_SENDER_KEYWORDS = ['healthchecks']
+_TRASH_BODY_KEYWORDS = ['청강생 승인을 요청드립니다. 서울대학교 New eTL에 승인 여부를 입력해 주세요.']
 
 load_dotenv()
 
@@ -910,6 +911,8 @@ if __name__ == "__main__":
         if any(kw in subject for kw in _TRASH_SUBJECT_KEYWORDS):
             classify_result = 'TRASH'
         elif any(kw in sender for kw in _TRASH_SENDER_KEYWORDS):
+            classify_result = 'TRASH'
+        elif any(kw in each_email['body'] for kw in _TRASH_BODY_KEYWORDS):
             classify_result = 'TRASH'
         else:
             classify_result, _ = classify_email(subject, each_email['body'])
