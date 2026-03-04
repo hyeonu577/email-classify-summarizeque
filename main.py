@@ -35,14 +35,25 @@ from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
-# --- Constants ---
-_SKIP_SUBJECT = '[서울대학교] 인증코드(Verification Code) 발송'
-_SKIP_BODY_FRAGMENT = 'SYSTEM: System failed to mount external device [USB Disk 1] partition'
-_TRASH_SUBJECT_KEYWORDS = ['Temperature log']
-_TRASH_SENDER_KEYWORDS = ['healthchecks']
-_TRASH_BODY_KEYWORDS = ['청강생 승인을 요청드립니다. 서울대학교 New eTL에 승인 여부를 입력해 주세요.']
-
 load_dotenv()
+
+# --- Constants (loaded from constants.json) ---
+def _load_constants() -> dict:
+    with open(f'{Path(__file__).parent}/constants.json', 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+_CONSTANTS = _load_constants()
+_SKIP_SUBJECTS: list[str] = _CONSTANTS['skip_subjects']
+_SKIP_BODY_FRAGMENTS: list[str] = _CONSTANTS['skip_body_fragments']
+_TRASH_SUBJECT_KEYWORDS: list[str] = _CONSTANTS['trash_subject_keywords']
+_TRASH_SENDER_KEYWORDS: list[str] = _CONSTANTS['trash_sender_keywords']
+_TRASH_BODY_KEYWORDS: list[str] = _CONSTANTS['trash_body_keywords']
+_REPLY_PREFIXES: list[str] = _CONSTANTS['reply_prefixes']
+_REWARD_KEYWORDS: list[str] = _CONSTANTS['reward_keywords']
+_TASK_PRIORITY: dict[tuple, int] = {
+    (k.rsplit('_', 1)[0], k.rsplit('_', 1)[1] == 'true'): v
+    for k, v in _CONSTANTS['task_priority'].items()
+}
 
 # --- Module-level singletons ---
 _openai_client: openai.OpenAI | None = None
@@ -50,14 +61,6 @@ _todoist_api: TodoistAPI | None = None
 _xgb_models: dict = {}
 _label_encoders: dict = {}
 _mention_pattern: re.Pattern | None = None
-
-# Todoist priority map keyed by (category, to_me)
-_TASK_PRIORITY: dict[tuple, int] = {
-    ('연구실', True): 4,
-    ('답장', True): 3,
-    ('멘션', True): 3,
-    ('TA', True): 3,
-}
 
 
 def _get_openai_client() -> openai.OpenAI:
@@ -148,7 +151,7 @@ def check_email():
                     gmail_thread_id = None
 
                 subject = str(make_header(decode_header(email_message.get('Subject'))))
-                if _SKIP_SUBJECT in subject:
+                if any(s in subject for s in _SKIP_SUBJECTS):
                     continue
 
                 fr = str(make_header(decode_header(email_message.get('From'))))
@@ -199,7 +202,7 @@ def check_email():
                 body_content = ''.join(d['body'] for d in preferred)
                 body_content = clear_body(body_content)
 
-                if _SKIP_BODY_FRAGMENT in body_content:
+                if any(frag in body_content for frag in _SKIP_BODY_FRAGMENTS):
                     continue
 
                 email_list_.append({
@@ -220,11 +223,7 @@ def check_email():
 
 
 def is_reply(email_subject):
-    reply_subject = ['Re:', 'RE:', '[RE]']
-    for candidate in reply_subject:
-        if email_subject.startswith(candidate):
-            return True
-    return False
+    return any(email_subject.startswith(prefix) for prefix in _REPLY_PREFIXES)
 
 
 def get_embedding(text, model="text-embedding-3-large", _depth=0):
@@ -256,8 +255,7 @@ def classify_email(email_subject, email_body, classify_type='all'):
     embedding_vector = get_embedding(full_text)
 
     if classify_type == 'all':
-        reward_keywords = ['기프티콘', '상품권', '쿠폰', '보상', '사례금', '사례비', '인건비']
-        has_reward = 1 if any(keyword in full_text for keyword in reward_keywords) else 0
+        has_reward = 1 if any(keyword in full_text for keyword in _REWARD_KEYWORDS) else 0
         X = np.array(embedding_vector + [has_reward]).reshape(1, -1)
     else:
         X = np.array(embedding_vector).reshape(1, -1)
@@ -908,7 +906,10 @@ if __name__ == "__main__":
         subject = each_email['subject']
         sender = each_email['sender']
 
-        if any(kw in subject for kw in _TRASH_SUBJECT_KEYWORDS):
+        if subject.startswith('[Hercules Noti]'):
+            classify_result = '연구실'
+            each_email['lab category'] = '중요'
+        elif any(kw in subject for kw in _TRASH_SUBJECT_KEYWORDS):
             classify_result = 'TRASH'
         elif any(kw in sender for kw in _TRASH_SENDER_KEYWORDS):
             classify_result = 'TRASH'
@@ -928,7 +929,7 @@ if __name__ == "__main__":
                 elif am_mentioned(each_email):
                     classify_result = '멘션'
 
-        if classify_result == '연구실':
+        if classify_result == '연구실' and 'lab category' not in each_email:
             lab_classify, _ = classify_email(subject, each_email['body'], classify_type='lab')
             each_email['lab category'] = lab_classify
 
