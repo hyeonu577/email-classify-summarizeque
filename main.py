@@ -48,6 +48,7 @@ _SKIP_BODY_FRAGMENTS: list[str] = _CONSTANTS['skip_body_fragments']
 _TRASH_SUBJECT_KEYWORDS: list[str] = _CONSTANTS['trash_subject_keywords']
 _TRASH_SENDER_KEYWORDS: list[str] = _CONSTANTS['trash_sender_keywords']
 _TRASH_BODY_KEYWORDS: list[str] = _CONSTANTS['trash_body_keywords']
+_TRASH_SENDER_LAB_CATEGORY_RULES: list[dict] = _CONSTANTS['trash_sender_lab_category_rules']
 _REPLY_PREFIXES: list[str] = _CONSTANTS['reply_prefixes']
 _REWARD_KEYWORDS: list[str] = _CONSTANTS['reward_keywords']
 _TASK_PRIORITY: dict[tuple, int] = {
@@ -792,6 +793,7 @@ def get_gmail_service():
 def create_reply_draft(to_email, cc, subject, body, thread_id, original_message_id,
                        original_content, original_datetime, original_from_header):
     service = get_gmail_service()
+    subject = ' '.join(subject.split())
 
     try:
         reply_header = f"On {original_datetime}, {original_from_header} wrote:"
@@ -932,6 +934,12 @@ if __name__ == "__main__":
         if classify_result == '연구실' and 'lab category' not in each_email:
             lab_classify, _ = classify_email(subject, each_email['body'], classify_type='lab')
             each_email['lab category'] = lab_classify
+
+        if classify_result == '연구실' and any(
+            rule['sender'] in sender and each_email.get('lab category') == rule['lab_category']
+            for rule in _TRASH_SENDER_LAB_CATEGORY_RULES
+        ):
+            classify_result = 'TRASH'
 
         logging.info(f'[{classify_result}] {subject}')
         if classify_result == 'TRASH':
