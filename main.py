@@ -31,6 +31,7 @@ import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
 from pathlib import Path
 from dotenv import load_dotenv
+from bs4 import BeautifulSoup
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -50,6 +51,7 @@ _TRASH_SENDER_KEYWORDS: list[str] = _CONSTANTS['trash_sender_keywords']
 _TRASH_BODY_KEYWORDS: list[str] = _CONSTANTS['trash_body_keywords']
 _TRASH_SENDER_LAB_CATEGORY_RULES: list[dict] = _CONSTANTS['trash_sender_lab_category_rules']
 _REPLY_PREFIXES: list[str] = _CONSTANTS['reply_prefixes']
+_FORWARD_PREFIXES: list[str] = _CONSTANTS['forward_prefixes']
 _REWARD_KEYWORDS: list[str] = _CONSTANTS['reward_keywords']
 _TASK_PRIORITY: dict[tuple, int] = {
     (k.rsplit('_', 1)[0], k.rsplit('_', 1)[1] == 'true'): v
@@ -130,6 +132,8 @@ def check_email():
     email_list_ = []
     imap_client = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
     imap_client.login(email_address, password)
+    all_mail_folder = _find_all_mail_folder(imap_client)
+    logging.info(f'All Mail folder: {all_mail_folder}')
     try:
         imap_client.select('Inbox')
 
@@ -182,6 +186,18 @@ def check_email():
                     received_date = dt.strftime('%Y-%m-%d')
                     received_datetime = dt.strftime("%b %d, %Y, at %I:%M %p")
 
+                thread_has_prior_messages = False
+                if gmail_thread_id and (is_reply(subject) or is_forward(subject)):
+                    try:
+                        imap_client.select(all_mail_folder, readonly=True)
+                        thread_status, thread_data = imap_client.search(None, f'X-GM-THRID {decimal_thread_id}')
+                        if thread_status == 'OK' and thread_data[0]:
+                            thread_has_prior_messages = len(thread_data[0].split()) > 1
+                    except Exception as e:
+                        logging.warning(f'Failed to check thread prior messages: {e}')
+                    finally:
+                        imap_client.select('Inbox')
+
                 body_candidate = []
                 for part in email_message.walk():
                     if part.get_content_type().startswith('text/'):
@@ -206,6 +222,16 @@ def check_email():
                 if any(frag in body_content for frag in _SKIP_BODY_FRAGMENTS):
                     continue
 
+                event_body = body_content
+                if thread_has_prior_messages and html_dicts:
+                    clean_html = ''.join(_remove_html_blockquotes(d['body']) for d in html_dicts)
+                    stripped = clear_body(clean_html)
+                    if stripped.strip():
+                        event_body = stripped
+                        logging.info(f'Reply/forward: stripped blockquotes for event_body ({subject})')
+                    else:
+                        logging.warning(f'Reply/forward: blockquote stripping produced empty body, falling back ({subject})')
+
                 email_list_.append({
                     'subject': subject,
                     'sender': fr,
@@ -213,6 +239,7 @@ def check_email():
                     'date': received_date,
                     'datetime': received_datetime,
                     'body': body_content,
+                    'event_body': event_body,
                     'to_me': to_me,
                     'email_id': message_id,
                     'gmail_thread_id': gmail_thread_id,
@@ -223,8 +250,36 @@ def check_email():
     return email_list_
 
 
+def _find_all_mail_folder(imap_client) -> str:
+    """Find the All Mail folder via \\All attribute from LIST response (locale-independent)."""
+    status, folders = imap_client.list()
+    if status != 'OK' or not folders:
+        return '"[Gmail]/All Mail"'
+    for folder in folders:
+        decoded = folder.decode('utf-8', errors='replace')
+        if r'\All' in decoded:
+            # Format: (\All ...) "/" "folder-name" or (\All ...) "/" folder-name
+            match = re.search(r'"([^"]+)"\s*$|(\S+)\s*$', decoded)
+            if match:
+                name = match.group(1) or match.group(2)
+                return f'"{name}"'
+    return '"[Gmail]/All Mail"'
+
+
 def is_reply(email_subject):
     return any(email_subject.startswith(prefix) for prefix in _REPLY_PREFIXES)
+
+
+def is_forward(email_subject):
+    return any(email_subject.startswith(prefix) for prefix in _FORWARD_PREFIXES)
+
+
+def _remove_html_blockquotes(html_body: str) -> str:
+    """Remove <blockquote> elements from HTML to strip quoted prior conversation."""
+    soup = BeautifulSoup(html_body, 'lxml')
+    for tag in soup.find_all('blockquote'):
+        tag.decompose()
+    return str(soup)
 
 
 def get_embedding(text, model="text-embedding-3-large", _depth=0):
@@ -649,7 +704,7 @@ def _handle_calendar_events(email_, header, sender, summary, due_date) -> bool:
     if email_["category"] not in ['연주회', '연구실']:
         return True
 
-    event_list = extract_event_info(email_['subject'], email_['body'])
+    event_list = extract_event_info(email_['subject'], email_.get('event_body', email_['body']))
     no_valid_event = True
     for each_event in event_list:
         logging.info(f'일정 처리중: {each_event.title}\n{each_event.reason}')
@@ -842,7 +897,7 @@ def generate_email_reply(given_email):
     sender = given_email['sender']
     recipient = given_email['receiver']
     email_subject = given_email['subject']
-    email_body = given_email['body']
+    email_body = given_email.get('event_body', given_email['body'])
 
     full_context = (
         "<input_email>\n"
