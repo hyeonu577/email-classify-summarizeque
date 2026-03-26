@@ -58,6 +58,16 @@ _TASK_PRIORITY: dict[tuple, int] = {
     for k, v in _CONSTANTS['task_priority'].items()
 }
 
+def _load_lab_email_addresses() -> tuple[list[str], list[str]]:
+    with open(f'{Path(__file__).parent}/lab-email-address', 'r', encoding='utf-8') as f:
+        content = f.read()
+    sections = content.split('---', 1)
+    lab = [line.strip() for line in sections[0].splitlines() if line.strip()]
+    hard = [line.strip() for line in sections[1].splitlines() if line.strip()] if len(sections) > 1 else []
+    return lab, hard
+
+_LAB_ADDRESSES, _LAB_HARD_CLASSIFY_SENDERS = _load_lab_email_addresses()
+
 # --- Module-level singletons ---
 _openai_client: openai.OpenAI | None = None
 _todoist_api: TodoistAPI | None = None
@@ -547,10 +557,7 @@ def am_mentioned(email_):
 def is_lab_mail(email_):
     all_addresses = list(email_['receiver'])
     all_addresses.append(email_['sender'])
-    with open(f'{get_current_path()}lab-email-address', 'r', encoding='utf-8') as file:
-        lines = file.readlines()
-        lab_addresses = [line.strip() for line in lines if line.strip()]
-    return any(lab_add in receive_add for lab_add in lab_addresses for receive_add in all_addresses)
+    return any(lab_add in receive_add for lab_add in _LAB_ADDRESSES + _LAB_HARD_CLASSIFY_SENDERS for receive_add in all_addresses)
 
 
 class EventDetails(BaseModel):
@@ -963,15 +970,14 @@ if __name__ == "__main__":
         subject = each_email['subject']
         sender = each_email['sender']
 
-        if subject.startswith('[Hercules Noti]'):
-            classify_result = '연구실'
-            each_email['lab category'] = '중요'
-        elif any(kw in subject for kw in _TRASH_SUBJECT_KEYWORDS):
+        if any(kw in subject for kw in _TRASH_SUBJECT_KEYWORDS):
             classify_result = 'TRASH'
         elif any(kw in sender for kw in _TRASH_SENDER_KEYWORDS):
             classify_result = 'TRASH'
         elif any(kw in each_email['body'] for kw in _TRASH_BODY_KEYWORDS):
             classify_result = 'TRASH'
+        elif any(addr in sender for addr in _LAB_HARD_CLASSIFY_SENDERS):
+            classify_result = '연구실'
         else:
             classify_result, _ = classify_email(subject, each_email['body'])
 
