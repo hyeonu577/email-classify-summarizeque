@@ -975,7 +975,7 @@ if __name__ == "__main__":
         else:
             classify_result, _ = classify_email(subject, each_email['body'])
 
-            if classify_result != '연구실' and is_reply(subject):
+            if classify_result != '연구실' and is_reply(subject) and each_email['to_me']:
                 classify_result = '답장'
 
             if classify_result == 'TRASH':
