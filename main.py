@@ -297,7 +297,7 @@ def get_embedding(text, model="text-embedding-3-large", _depth=0):
     try:
         result = _get_openai_client().embeddings.create(input=[text], model=model)
     except Exception as e:
-        if 'Please reduce your prompt' in str(e) and len(text) > 100 and _depth < 5:
+        if ('Please reduce your prompt' in str(e) or 'maximum input length' in str(e)) and len(text) > 100 and _depth < 5:
             logging.warning('텍스트가 너무 길어 절반으로 줄여 다시 시도합니다...')
             return get_embedding(text[:len(text) // 2], model=model, _depth=_depth + 1)
         raise
