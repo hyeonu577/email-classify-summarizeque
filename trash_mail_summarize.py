@@ -352,6 +352,7 @@ def get_trash_email_list_with_specific_batch_id(batch_id):
 def check_processing_batch():
     batch_list = get_processing_batch_list()
     final_body = ''
+    email_count = 0
     to_be_deleted_batch_from_batch_list = []
     to_be_deleted_email_from_trash_can = []
     for each_batch in batch_list:
@@ -369,6 +370,7 @@ def check_processing_batch():
                                                                   each_failed_email['body'])
                     sender = extract_name_and_email(each_failed_email['sender'])
                     final_body += f'{each_failed_email["subject"]}\n\n{sender}\n\n{email_summary}\n\n\n\n'
+                    email_count += 1
                 final_body.strip()
                 to_be_deleted_batch_from_batch_list.append(each_batch)
                 to_be_deleted_email_from_trash_can.extend(failed_email_list)
@@ -385,19 +387,20 @@ def check_processing_batch():
                 email_summary = summarize_email_without_image(email_subject, email_dictionary['body'])
             sender = extract_name_and_email(email_dictionary['sender'])
             final_body += f'{email_subject}\n\n{sender}\n\n{email_summary}\n\n\n\n'
+            email_count += 1
         final_body.strip()
         to_be_deleted_batch_from_batch_list.append(each_batch)
         finished_email_list = get_trash_email_list_with_specific_batch_id(each_batch)
         to_be_deleted_email_from_trash_can.extend(finished_email_list)
     if final_body == '':
-        return False
+        return 0
     true_email.send_email('SNU 기타 이메일', final_body, receiver='hyeonu@662607015.com')
     for each_batch in to_be_deleted_batch_from_batch_list:
         delete_line_from_file(f'{get_current_path()}processing batch list.txt', each_batch)
     for each_failed_email in to_be_deleted_email_from_trash_can:
         os.remove(f"{get_current_path()}trash_can/{each_failed_email['hash']}.json")
-        
-    return True
+
+    return email_count
 
 
 if __name__ == '__main__':
