@@ -386,9 +386,8 @@ Using the provided email details, summarize the content in three sentences or fe
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": message}
             ],
-            max_tokens=500,
-            temperature=0.3,
-            model="gpt-4o-mini",
+            max_completion_tokens=500,
+            model="gpt-5.4-nano",
             timeout=60.0,
         )
         return chat_completion.choices[0].message.content
@@ -406,7 +405,7 @@ def _summarize_with_reasoning(email_subject: str, email_content: str, instructio
     )
     try:
         response = _get_openai_client().responses.create(
-            model="gpt-5-mini-2025-08-07",
+            model="gpt-5.4-mini",
             reasoning={"effort": "medium"},
             instructions=instructions,
             input=user_input,
@@ -609,7 +608,7 @@ def extract_event_info(email_subject: str, email_body: str):
 
     try:
         response = _get_openai_client().responses.parse(
-            model="gpt-5-mini-2025-08-07",
+            model="gpt-5.4-mini",
             reasoning={"effort": "medium"},
             input=[
                 {
@@ -667,12 +666,13 @@ def check_event_duplication(event):
         instructions = (
             "당신은 캘린더 일정 관리 비서입니다. "
             "사용자가 추가하려는 '새로운 일정'이 '기존 일정 목록'에 이미 존재하는지 확인하세요. "
-            "완전히 동일하지 않더라도, 실질적으로 같은 일정이라면 중복(True)으로 간주하세요."
+            "완전히 동일하지 않더라도, 실질적으로 같은 일정이라면 중복(True)으로 간주하세요. "
+            "시간 불일치만을 근거로 중복이 아니라고 결론내리지 마세요."
         )
         user_input = f"--- 새로운 일정 ---\n{new_event_info}\n\n--- 기존 일정 목록 ---\n{existing_events_info}"
 
         response = _get_openai_client().responses.parse(
-            model="gpt-5-mini-2025-08-07",
+            model="gpt-5.4-mini",
             reasoning={"effort": "medium"},
             instructions=instructions,
             input=user_input,
@@ -919,7 +919,7 @@ def generate_email_reply(given_email):
 
     try:
         response = _get_openai_client().responses.parse(
-            model="gpt-5-mini-2025-08-07",
+            model="gpt-5.4-mini",
             reasoning={"effort": "medium"},
             instructions=(
                 f"You are an expert business email assistant. The user's name is {os.getenv('USER_NAME')}. Analyze the email provided in <input_email> tags.\n\n"

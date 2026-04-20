@@ -27,7 +27,6 @@ def extract_name_and_email(text):
 
 
 def summarize_email_without_image(email_subject, email_content):
-    summarize_api_key = os.getenv('OPENAI_API_KEY_EMAIL')
     system_message = '''You are an expert in summarizing email content in Korean, but you may use terms in other languages if they are technical.
 
 Using the provided email details, summarize the content in three sentences or fewer. Number each sentence for clarity.
@@ -45,27 +44,27 @@ Using the provided email details, summarize the content in three sentences or fe
 
 # Examples
 
-**Input:** 
+**Input:**
 - 제목: [Email Subject]
 - 본문: [Email Body]
 
-**Output:** 
+**Output:**
 1. [Summarized sentence one capturing a key point.]
 2. [Summarized sentence two covering additional important information.]
 3. [Optional summarized sentence three to complete the summary, if necessary.]
 
 (Ensure summaries are realistic in length and use meaningful placeholders.)'''
     message = f'제목: {email_subject}\n본문: {email_content}'
+    message = [{"type": "text", "text": message}]
     try:
-        client = openai.OpenAI(api_key=summarize_api_key)
-        chat_completion = client.chat.completions.create(
+        chat_completion = get_openai_client().chat.completions.create(
             messages=[
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": message}
             ],
-            max_tokens=500,
-            temperature=0.3,
-            model="gpt-4o-mini",
+            max_completion_tokens=500,
+            model="gpt-5.4-nano",
+            timeout=60.0,
         )
         return chat_completion.choices[0].message.content
     except Exception as e:
