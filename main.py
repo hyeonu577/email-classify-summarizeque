@@ -938,7 +938,7 @@ def generate_email_reply(given_email):
             ),
             input=full_context,
             text_format=ReplyDecision,
-            timeout=60.0,
+            timeout=90.0,
         )
 
         result: ReplyDecision = response.output_parsed
