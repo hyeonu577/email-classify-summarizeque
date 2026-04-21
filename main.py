@@ -68,6 +68,9 @@ def _load_lab_email_addresses() -> tuple[list[str], list[str]]:
 
 _LAB_ADDRESSES, _LAB_HARD_CLASSIFY_SENDERS = _load_lab_email_addresses()
 
+# --- Feature flags ---
+GENERATE_REPLY_DRAFTS = False  # When True, LLM drafts reply_body/reply_to and a Gmail draft is created. When False, LLM only decides if a reply is needed.
+
 # --- Module-level singletons ---
 _openai_client: openai.OpenAI | None = None
 _todoist_api: TodoistAPI | None = None
@@ -587,6 +590,15 @@ class EventDuplicationCheck(BaseModel):
     )
 
 
+class ReplyCheck(BaseModel):
+    is_reply_needed: bool = Field(
+        description="답장이 필요한 이메일인지 여부. (질문이 있거나, 요청이 있는 경우 True)"
+    )
+    reason: str = Field(
+        description="왜 답장이 필요하거나 필요하지 않다고 판단했는지에 대한 간략한 이유."
+    )
+
+
 class ReplyDecision(BaseModel):
     is_reply_needed: bool = Field(
         description="답장이 필요한 이메일인지 여부. (질문이 있거나, 요청이 있는 경우 True)"
@@ -743,21 +755,22 @@ def _handle_reply(email_, header, sender, summary, due_date) -> bool:
     if not reply_email.is_reply_needed:
         return False
 
-    cc = list(email_['receiver'])
-    cc.append(email_['sender'])
-    cc = [extract_name_and_email(each_address)[2] for each_address in cc
-          if reply_email.reply_to not in each_address and os.getenv('SNU_GMAIL_EMAIL_ADDRESS') not in each_address]
-    create_reply_draft(
-        to_email=reply_email.reply_to,
-        cc=cc,
-        subject=email_['subject'],
-        body=reply_email.reply_body,
-        thread_id=email_['gmail_thread_id'],
-        original_message_id=email_['email_id'],
-        original_content=email_['body'],
-        original_datetime=email_['datetime'],
-        original_from_header=email_['sender']
-    )
+    if GENERATE_REPLY_DRAFTS:
+        cc = list(email_['receiver'])
+        cc.append(email_['sender'])
+        cc = [extract_name_and_email(each_address)[2] for each_address in cc
+              if reply_email.reply_to not in each_address and os.getenv('SNU_GMAIL_EMAIL_ADDRESS') not in each_address]
+        create_reply_draft(
+            to_email=reply_email.reply_to,
+            cc=cc,
+            subject=email_['subject'],
+            body=reply_email.reply_body,
+            thread_id=email_['gmail_thread_id'],
+            original_message_id=email_['email_id'],
+            original_content=email_['body'],
+            original_datetime=email_['datetime'],
+            original_from_header=email_['sender']
+        )
     add_todolist(
         name=f'{header} 답장',
         description=f'답장 필요함.\n({reply_email.reason})\n\n{sender}\n\n{summary}',
@@ -914,34 +927,46 @@ def generate_email_reply(given_email):
         f"Body:\n{email_body}\n"
         "</input_email>"
     )
-    with open(f'{get_current_path()}reply-style.xml', 'r', encoding='utf-8') as f:
-        style_examples = f.read()
+
+    if GENERATE_REPLY_DRAFTS:
+        with open(f'{get_current_path()}reply-style.xml', 'r', encoding='utf-8') as f:
+            style_examples = f.read()
+        instructions = (
+            f"You are an expert business email assistant. The user's name is {os.getenv('USER_NAME')}. Analyze the email provided in <input_email> tags.\n\n"
+
+            "YOUR GOAL:\n"
+            "1. DECIDE: Determine if a reply is strictly necessary. Focus only on the most recent message in the thread. Ignore any unanswered questions or requests from previous emails if they are not reiterated in the latest message. A reply is needed only if the latest message contains explicit questions, new requests, or urgent scheduling needs directed at the user.\n"
+            "2. DRAFT: If a reply is needed, draft a polite, concise business email response.\n"
+            "   - Match the language of the sender.\n"
+            "   - Strictly follow the tone and style shown in the <examples> section below.\n"
+            "   - Identify the correct recipient for 'reply_to'.\n\n"
+
+            "OUTPUT RULES:\n"
+            "- If no reply is needed, return 'is_reply_needed' as False and empty strings for body/recipient.\n\n"
+
+            f"{style_examples}"
+        )
+        text_format = ReplyDecision
+    else:
+        instructions = (
+            f"You are an expert business email assistant. The user's name is {os.getenv('USER_NAME')}. Analyze the email provided in <input_email> tags.\n\n"
+
+            "YOUR GOAL:\n"
+            "DECIDE: Determine if a reply is strictly necessary. Focus only on the most recent message in the thread. Ignore any unanswered questions or requests from previous emails if they are not reiterated in the latest message. A reply is needed only if the latest message contains explicit questions, new requests, or urgent scheduling needs directed at the user.\n"
+        )
+        text_format = ReplyCheck
 
     try:
         response = _get_openai_client().responses.parse(
             model="gpt-5.4-mini",
             reasoning={"effort": "medium"},
-            instructions=(
-                f"You are an expert business email assistant. The user's name is {os.getenv('USER_NAME')}. Analyze the email provided in <input_email> tags.\n\n"
-
-                "YOUR GOAL:\n"
-                "1. DECIDE: Determine if a reply is strictly necessary. Focus only on the most recent message in the thread. Ignore any unanswered questions or requests from previous emails if they are not reiterated in the latest message. A reply is needed only if the latest message contains explicit questions, new requests, or urgent scheduling needs directed at the user.\n"
-                "2. DRAFT: If a reply is needed, draft a polite, concise business email response.\n"
-                "   - Match the language of the sender.\n"
-                "   - Strictly follow the tone and style shown in the <examples> section below.\n"
-                "   - Identify the correct recipient for 'reply_to'.\n\n"
-
-                "OUTPUT RULES:\n"
-                "- If no reply is needed, return 'is_reply_needed' as False and empty strings for body/recipient.\n\n"
-
-                f"{style_examples}"
-            ),
+            instructions=instructions,
             input=full_context,
-            text_format=ReplyDecision,
+            text_format=text_format,
             timeout=90.0,
         )
 
-        result: ReplyDecision = response.output_parsed
+        result = response.output_parsed
         logging.info(f"답장 필요: {result.is_reply_needed} / 이유: {result.reason}")
         return result
 
