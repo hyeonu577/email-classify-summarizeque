@@ -15,7 +15,9 @@ import os
 import html2text
 import re
 import json
+import time
 import trash_mail_summarize
+import requests
 from todoist_api_python.api import TodoistAPI
 from pydantic import BaseModel, Field
 import sqlite3
@@ -819,14 +821,40 @@ def finalize_email(to_be_finalized_email, given_summary):
 
 
 def add_todolist(name, description, due_date, priority):
-    task = _get_todoist_api().add_task(
-        content=name,
-        description=description,
-        due_string=due_date,
-        priority=priority,
-        labels=['이메일']
-    )
-    logging.info(f"작업 생성 성공: {task.content} (ID: {task.id})")
+    delays = [1, 2, 4]
+    for attempt in range(len(delays) + 1):
+        retry_after = None
+        try:
+            task = _get_todoist_api().add_task(
+                content=name,
+                description=description,
+                due_string=due_date,
+                priority=priority,
+                labels=['이메일']
+            )
+            logging.info(f"작업 생성 성공: {task.content} (ID: {task.id})")
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            err = e
+        except requests.exceptions.HTTPError as e:
+            status = getattr(e.response, 'status_code', None)
+            transient = status == 429 or (status is not None and 500 <= status < 600)
+            if not transient:
+                raise
+            err = e
+            if status == 429:
+                header_val = e.response.headers.get('Retry-After')
+                if header_val is not None:
+                    try:
+                        retry_after = max(0, int(float(header_val)))
+                    except ValueError:
+                        retry_after = None
+        if attempt == len(delays):
+            logging.error(f"Todoist add_task 재시도 한도 초과: {err}")
+            raise err
+        delay = retry_after if retry_after is not None else delays[attempt]
+        logging.warning(f"Todoist add_task 일시적 오류({err}); {delay}초 후 재시도")
+        time.sleep(delay)
 
 
 def extract_name_and_email(text):
@@ -1044,7 +1072,10 @@ if __name__ == "__main__":
         else:
             summary = summarize_email(each_email['subject'], each_email['body'], img_urls=extract_image_urls(each_email['body']))
 
-        finalize_email(each_email, summary)
+        try:
+            finalize_email(each_email, summary)
+        except Exception as e:
+            logging.exception(f"finalize_email 실패, 다음 메일로 진행: {each_email.get('subject')!r} ({e})")
 
     logging.info('email summarize complete')
     trash_mail_summarize.start_batch()
