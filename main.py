@@ -297,12 +297,37 @@ def _remove_html_blockquotes(html_body: str) -> str:
     return str(soup)
 
 
+def _is_input_too_long_error(err) -> bool:
+    """True when the embeddings API rejected the input for being too long.
+
+    text-embedding-3-large rejects a single input over 8,191 tokens
+    ('context_length_exceeded') and any request over 300,000 tokens
+    ('max_tokens_per_request'); match both so the halving retry engages.
+    """
+    msg = str(err).lower()
+    return any(
+        marker in msg
+        for marker in (
+            'please reduce your prompt',
+            'maximum input length',
+            'maximum context length',
+            'context_length_exceeded',
+            'tokens per request',
+            'max_tokens_per_request',
+            'reduce the length',
+        )
+    )
+
+
 def get_embedding(text, model="text-embedding-3-large", _depth=0):
     """텍스트를 OpenAI 임베딩 벡터로 변환"""
     try:
         result = _get_openai_client().embeddings.create(input=[text], model=model)
     except Exception as e:
-        if ('Please reduce your prompt' in str(e) or 'maximum input length' in str(e)) and len(text) > 100 and _depth < 5:
+        # Too-long inputs are halved and retried until they fit. _depth < 12 is
+        # enough to bring even a several-hundred-thousand-token body back under
+        # the 8,191-token per-input limit.
+        if _is_input_too_long_error(e) and len(text) > 100 and _depth < 12:
             logging.warning('텍스트가 너무 길어 절반으로 줄여 다시 시도합니다...')
             return get_embedding(text[:len(text) // 2], model=model, _depth=_depth + 1)
         raise
