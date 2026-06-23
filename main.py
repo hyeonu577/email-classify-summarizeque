@@ -145,7 +145,7 @@ def check_email():
     yesterday_str = yesterday.strftime('%d-%b-%Y')
 
     email_list_ = []
-    imap_client = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+    imap_client = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT, timeout=60)
     imap_client.login(email_address, password)
     all_mail_folder = _find_all_mail_folder(imap_client)
     logging.info(f'All Mail folder: {all_mail_folder}')
