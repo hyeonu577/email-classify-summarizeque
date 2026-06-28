@@ -800,7 +800,7 @@ def _handle_reply(email_, header, sender, summary, due_date) -> bool:
         )
     add_todolist(
         name=f'{header} 답장',
-        description=f'답장 필요함.\n({reply_email.reason})\n\n{sender}\n\n{summary}',
+        description=f'{sender}\n\n답장 필요함.\n({reply_email.reason})\n\n{summary}',
         due_date=due_date,
         priority=4
     )
