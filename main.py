@@ -29,8 +29,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from email.message import EmailMessage
 import numpy as np
-import xgboost as xgb
-from sklearn.preprocessing import LabelEncoder
 from pathlib import Path
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
@@ -76,8 +74,7 @@ GENERATE_REPLY_DRAFTS = False  # When True, LLM drafts reply_body/reply_to and a
 # --- Module-level singletons ---
 _openai_client: openai.OpenAI | None = None
 _todoist_api: TodoistAPI | None = None
-_xgb_models: dict = {}
-_label_encoders: dict = {}
+_classifiers: dict = {}
 _mention_pattern: re.Pattern | None = None
 
 
@@ -95,22 +92,36 @@ def _get_todoist_api() -> TodoistAPI:
     return _todoist_api
 
 
-def _get_classifier(classify_type: str) -> xgb.XGBClassifier:
-    if classify_type not in _xgb_models:
-        m = xgb.XGBClassifier()
-        m.load_model(f'{get_current_path()}xgb_model_{classify_type}.json')
-        _xgb_models[classify_type] = m
-    return _xgb_models[classify_type]
-
-
-def _get_label_encoder(classify_type: str) -> LabelEncoder:
-    if classify_type not in _label_encoders:
+def _get_classifier(classify_type: str) -> dict:
+    """로지스틱 회귀 모델(JSON: classes, coef, intercept)과 한글 라벨 로드"""
+    if classify_type not in _classifiers:
+        with open(f'{get_current_path()}logreg_model_{classify_type}.json', 'r', encoding='utf-8') as f:
+            model = json.load(f)
         with open(f'{get_current_path()}label_encoder.json', 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        le = LabelEncoder()
-        le.classes_ = np.array(data[classify_type])
-        _label_encoders[classify_type] = le
-    return _label_encoders[classify_type]
+            label_map = json.load(f)[classify_type]
+        # 모델 classes(영문)를 label_encoder.json의 한글 라벨로 바꾼다
+        missing = [c for c in model['classes'] if c not in label_map]
+        if missing:
+            raise ValueError(f"label_encoder.json[{classify_type!r}]에 없는 모델 클래스: {missing}")
+        coef = np.array(model['coef'])
+        # softmax 추론은 클래스가 3개 이상인 다항 모델(coef가 클래스 수만큼의 행)에서만 맞다
+        if coef.shape[0] != len(model['classes']):
+            raise ValueError(f"logreg_model_{classify_type}.json: coef {coef.shape[0]}행, "
+                             f"classes {len(model['classes'])}개로 다항 모델이 아닙니다")
+        _classifiers[classify_type] = {
+            'label_names': [label_map[c] for c in model['classes']],
+            'coef': coef,
+            'intercept': np.array(model['intercept']),
+        }
+    return _classifiers[classify_type]
+
+
+def _predict_proba(classifier: dict, X: np.ndarray) -> np.ndarray:
+    """softmax(X @ coef.T + intercept): sklearn LogisticRegression.predict_proba와 같은 값"""
+    logits = X @ classifier['coef'].T + classifier['intercept']
+    logits -= logits.max(axis=1, keepdims=True)
+    exp = np.exp(logits)
+    return exp / exp.sum(axis=1, keepdims=True)
 
 
 def _get_mention_pattern() -> re.Pattern | None:
@@ -356,17 +367,15 @@ def classify_email(email_subject, email_body, classify_type='all'):
     else:
         X = np.array(embedding_vector).reshape(1, -1)
 
-    model = _get_classifier(classify_type)
-    le = _get_label_encoder(classify_type)
+    classifier = _get_classifier(classify_type)
+    label_names = classifier['label_names']
 
-    y_pred = model.predict(X)[0]
-    y_pred_proba = model.predict_proba(X)[0]
-
-    predicted_category = le.inverse_transform([y_pred])[0]
+    y_pred_proba = _predict_proba(classifier, X)[0]
+    predicted_category = label_names[int(np.argmax(y_pred_proba))]
 
     category_probs = {
         category: float(prob)
-        for category, prob in zip(le.classes_, y_pred_proba)
+        for category, prob in zip(label_names, y_pred_proba)
     }
     logging.info(f"분류 결과: {predicted_category}")
     for cat, prob in sorted(category_probs.items(), key=lambda x: x[1], reverse=True):

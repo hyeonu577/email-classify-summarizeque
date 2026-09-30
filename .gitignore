@@ -6,6 +6,7 @@ token.json
 trash_can/
 processing batch list.txt
 xgb_model_*.json
+logreg_model_*.json
 lab-email-address
 reply-style.xml
 constants.json
