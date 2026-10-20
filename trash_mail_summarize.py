@@ -219,7 +219,9 @@ def get_batch_result(batch_id):
         raise Exception('unexpected error')
     if batch.request_counts.succeeded == 0 or not batch.results_url:  # 전부 실패했거나 결과 보관 기간(29일)이 지남
         raise Exception('failed')
-    return list(get_anthropic_client().messages.batches.results(batch_id))
+    # 결과는 스트림으로 읽는다. 클라이언트가 GC로 정리되면 연결이 닫히므로 다 읽을 때까지 참조를 붙잡아 둔다
+    client = get_anthropic_client()
+    return list(client.messages.batches.results(batch_id))
 
 
 def convert_batch_result_into_readable_form(batch_result):
