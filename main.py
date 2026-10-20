@@ -7,6 +7,7 @@ import datetime
 from typing import List
 from zoneinfo import ZoneInfo
 import openai
+import anthropic
 import xxhash
 from true_calendar import true_calendar
 from true_email import true_email
@@ -19,7 +20,7 @@ import time
 import trash_mail_summarize
 import requests
 from todoist_api_python.api import TodoistAPI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 import sqlite3
 import os.path
 import base64
@@ -71,8 +72,14 @@ _LAB_ADDRESSES, _LAB_HARD_CLASSIFY_SENDERS = _load_lab_email_addresses()
 # --- Feature flags ---
 GENERATE_REPLY_DRAFTS = False  # When True, LLM drafts reply_body/reply_to and a Gmail draft is created. When False, LLM only decides if a reply is needed.
 
+# --- Claude models ---
+_SONNET_MODEL = 'claude-sonnet-5-5'
+_OPUS_MODEL = 'claude-opus-5-5'
+_CLAUDE_TIMEOUT = 120.0  # Opus 5.5는 thinking을 끌 수 없어 긴 스레드는 60초를 넘길 수 있다
+
 # --- Module-level singletons ---
 _openai_client: openai.OpenAI | None = None
+_anthropic_client: anthropic.Anthropic | None = None
 _todoist_api: TodoistAPI | None = None
 _classifiers: dict = {}
 _mention_pattern: re.Pattern | None = None
@@ -83,6 +90,17 @@ def _get_openai_client() -> openai.OpenAI:
     if _openai_client is None:
         _openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY_EMAIL'))
     return _openai_client
+
+
+def _get_anthropic_client() -> anthropic.Anthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        api_key = os.getenv('ANTHROPIC_API_KEY_EMAIL')
+        if not api_key:
+            # api_key=None이면 SDK가 다른 자격증명(ANTHROPIC_API_KEY, ant 프로필)으로 조용히 넘어간다
+            raise RuntimeError('ANTHROPIC_API_KEY_EMAIL이 설정되지 않았습니다')
+        _anthropic_client = anthropic.Anthropic(api_key=api_key)
+    return _anthropic_client
 
 
 def _get_todoist_api() -> TodoistAPI:
@@ -382,6 +400,57 @@ def classify_email(email_subject, email_body, classify_type='all'):
         logging.info(f"  {cat}: {prob*100:.2f}%")
 
     return predicted_category, category_probs
+
+
+class ClaudeOutputError(Exception):
+    """거절·잘림·빈 출력·스키마 불일치·요청 거부. 같은 입력으로 다시 호출해도 반복되기 쉬운 실패."""
+
+
+# 같은 요청을 다시 보내도 똑같이 실패하는 4xx(본문 과다, 스키마 거부, 이미지 URL 실패 등)
+_PERMANENT_REQUEST_ERRORS = (anthropic.BadRequestError, anthropic.RequestTooLargeError,
+                             anthropic.UnprocessableEntityError)
+
+
+def _claude_request(model: str, system: str, content, timeout: float) -> dict:
+    return {
+        'model': model,
+        'max_tokens': 16000,
+        'system': system,
+        'messages': [{'role': 'user', 'content': content}],
+        'output_config': {'effort': 'medium'},
+        'betas': ['server-side-fallback-2026-07-01'],
+        'fallbacks': 'default',
+        'timeout': timeout,
+    }
+
+
+def _claude_text(model: str, system: str, content, timeout: float = _CLAUDE_TIMEOUT) -> str:
+    try:
+        response = _get_anthropic_client().beta.messages.create(**_claude_request(model, system, content, timeout))
+    except _PERMANENT_REQUEST_ERRORS as e:
+        raise ClaudeOutputError(f'요청 거부: {e}') from e
+    if response.stop_reason != 'end_turn':
+        raise ClaudeOutputError(f'stop_reason={response.stop_reason}')
+    text = ''.join(block.text for block in response.content if block.type == 'text')
+    if not text.strip():
+        raise ClaudeOutputError('빈 응답')
+    return text
+
+
+def _claude_parse(model: str, system: str, content, output_format, timeout: float = _CLAUDE_TIMEOUT):
+    try:
+        response = _get_anthropic_client().beta.messages.parse(
+            output_format=output_format, **_claude_request(model, system, content, timeout))
+    except _PERMANENT_REQUEST_ERRORS as e:
+        raise ClaudeOutputError(f'요청 거부: {e}') from e
+    except ValidationError as e:
+        # SDK는 text를 스키마로 검증한 뒤 돌려준다. 거절·잘림으로 JSON이 깨지면 여기로 온다
+        raise ClaudeOutputError(f'구조화 출력 검증 실패: {e}') from e
+    if response.stop_reason != 'end_turn':
+        raise ClaudeOutputError(f'stop_reason={response.stop_reason}')
+    if response.parsed_output is None:
+        raise ClaudeOutputError('구조화 출력 없음')
+    return response.parsed_output
 
 
 def summarize_email(email_subject, email_content, img_urls=None):
