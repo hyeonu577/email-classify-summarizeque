@@ -1,8 +1,6 @@
 import json
-import jsonlines
 import os
-import datetime
-import openai
+import anthropic
 from true_email import true_email
 import re
 from pathlib import Path
@@ -10,6 +8,9 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
+
+HAIKU_MODEL = 'claude-haiku-5-5'
+TRASH_MAX_TOKENS = 8000
 
 
 def extract_name_and_email(text):
@@ -57,25 +58,37 @@ Using the provided email details, summarize the content in three sentences or fe
     message = f'제목: {email_subject}\n본문: {email_content}'
     message = [{"type": "text", "text": message}]
     try:
-        chat_completion = get_openai_client().chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": message}
-            ],
-            max_completion_tokens=500,
-            model="gpt-5.4-nano",
+        response = get_anthropic_client().messages.create(
+            model=HAIKU_MODEL,
+            max_tokens=TRASH_MAX_TOKENS,
+            system=system_message,
+            messages=[{"role": "user", "content": message}],
+            output_config={"effort": "medium"},
             timeout=60.0,
         )
-        return chat_completion.choices[0].message.content
     except Exception as e:
         print(f"요약 중 에러 발생: {e}")
         return f"요약 중 에러 발생: {e}"
+    summary = extract_summary_text(response)
+    if summary is None:
+        print(f"요약 중 에러 발생: stop_reason={response.stop_reason}")
+        return f"요약 중 에러 발생: stop_reason={response.stop_reason}"
+    return summary
 
 
-def get_openai_client():
-    trash_mail_api_key = os.getenv('OPENAI_API_KEY_EMAIL')
-    client = openai.OpenAI(api_key=trash_mail_api_key)
-    return client
+def get_anthropic_client():
+    api_key = os.getenv('ANTHROPIC_API_KEY_EMAIL')
+    if not api_key:
+        # api_key=None이면 SDK가 다른 자격증명(ANTHROPIC_API_KEY, ant 프로필)으로 조용히 넘어간다
+        raise RuntimeError('ANTHROPIC_API_KEY_EMAIL이 설정되지 않았습니다')
+    return anthropic.Anthropic(api_key=api_key)
+
+
+def extract_summary_text(message):  # 정상 종료(end_turn)된 응답의 text만 이어 붙여 반환. 아니면 None
+    if message.stop_reason != 'end_turn':
+        return None
+    text = ''.join(block.text for block in message.content if block.type == 'text')
+    return text if text.strip() else None
 
 
 def get_current_path():
@@ -121,7 +134,7 @@ def extract_image_urls(text):
     return urls
 
 
-def generate_each_line_of_batch_file(email):  # jsonl 파일의 각 줄을 만드는 함수
+def generate_each_line_of_batch_file(email):  # 배치 요청 하나를 만드는 함수
     system_message = '''이메일 본문을 분석하여 3문장 이하로 요약하세요. 각 문장은 번호를 매기세요. 모든 응답은 한국어로 작성하세요. 단, 전문 용어는 다른 언어를 사용해도 됩니다.
 
 # Steps
@@ -175,107 +188,53 @@ def generate_each_line_of_batch_file(email):  # jsonl 파일의 각 줄을 만�
     if image_list:
         image_url = image_list[0]
         final_user_message = [{"type": "text", "text": message},
-                              {"type": "image_url", "image_url": {"url": image_url}}]
+                              {"type": "image", "source": {"type": "url", "url": image_url}}]
     else:
         final_user_message = message
-    fuit_json = {"custom_id": email['hash'],
-                 "method": "POST",
-                 "url": "/v1/chat/completions",
-                 "body": {
-                     "messages": [{"role": "system", "content": system_message},
-                                  {"role": "user", "content": final_user_message}],
-                     "max_tokens": 500, "temperature": 0.3,
-                     "model": "gpt-4.1-nano"}}
-    return fuit_json
+    return {"custom_id": email['hash'],
+            "params": {
+                "model": HAIKU_MODEL,
+                "max_tokens": TRASH_MAX_TOKENS,
+                "system": system_message,
+                "messages": [{"role": "user", "content": final_user_message}],
+                "output_config": {"effort": "medium"}}}
 
 
-def generate_batch_file_with_trash_mail_list(trash_mail_list):  # batch 작업 들어가지 않은 이메일 list를 주면 batch 파일 만드는 함수
-    jsonl_data = [generate_each_line_of_batch_file(each_trash_mail) for each_trash_mail in trash_mail_list]
-
-    folder_path = f"{get_current_path()}jsonl_file_folder"
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path, exist_ok=True)
-
-    jsonl_file_name = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
-    jsonl_file_path = f"{folder_path}/{jsonl_file_name}.jsonl"
-    with jsonlines.open(jsonl_file_path, mode="w") as writer:
-        writer.write_all(jsonl_data)
-    print(f'generated batch file: {jsonl_file_path}')
-    return jsonl_file_path
-
-
-def start_processing_batch_file(batch_file_path):  # batch 파일을 주면 작업 시작하는 함수
-    batch_input_file = upload_batch_file(batch_file_path)
-
-    client = get_openai_client()
-
-    batch_input_file_id = batch_input_file.id
-    batch = client.batches.create(
-        input_file_id=batch_input_file_id,
-        endpoint="/v1/chat/completions",
-        completion_window="24h"
-    )
-    return batch
-
-
-def upload_batch_file(batch_file_name):
-    client = get_openai_client()
-    batch_input_file = client.files.create(
-        file=open(batch_file_name, "rb"),
-        purpose="batch"
-    )
-    return batch_input_file
+def start_processing_batch_file(requests):  # 배치 요청 목록을 주면 작업 시작하는 함수
+    return get_anthropic_client().messages.batches.create(requests=requests)
 
 
 def get_batch_object_with_id(batch_id):
-    client = get_openai_client()
-    batch = client.batches.retrieve(batch_id)
-    return batch
+    return get_anthropic_client().messages.batches.retrieve(batch_id)
 
 
 def get_batch_result(batch_id):
-    batch = get_batch_object_with_id(batch_id)
-    if batch.status == 'completed':
-        if batch.request_counts.completed == 0:
-            raise Exception('failed')
-        output_file_id = batch.output_file_id
-        client = get_openai_client()
-        try:
-            file_response = client.files.content(output_file_id)
-            good_result = file_response.text
-            print(f'good result: {good_result}')
-        except ValueError:
-            error_file_id = batch.error_file_id
-            file_response = client.files.content(error_file_id)
-            bad_result = file_response.text
-            print(f'bad result: {bad_result}')
-            final_return = bad_result
-            return final_return
-        if batch.request_counts.failed == 0:
-            final_return = good_result
-        else:
-            error_file_id = batch.error_file_id
-            file_response = client.files.content(error_file_id)
-            bad_result = file_response.text
-            final_return = good_result + bad_result
-        return final_return
-    elif batch.status in ['validating', 'in_progress', 'finalizing']:
-        raise Exception('in progress')
-    elif batch.status in ['failed', 'expired', 'cancelling', 'cancelled']:
+    if not batch_id.startswith('msgbatch_'):  # 전환 전에 남은 OpenAI 배치: 전체 실패로 보고 즉시 요약한다
+        print(f'{batch_id}: Claude 배치가 아니므로 즉시 요약으로 처리')
         raise Exception('failed')
-    else:
+    batch = get_batch_object_with_id(batch_id)
+    if batch.processing_status in ['in_progress', 'canceling']:
+        raise Exception('in progress')
+    if batch.processing_status != 'ended':
         raise Exception('unexpected error')
+    if batch.request_counts.succeeded == 0 or not batch.results_url:  # 전부 실패했거나 결과 보관 기간(29일)이 지남
+        raise Exception('failed')
+    return list(get_anthropic_client().messages.batches.results(batch_id))
 
 
 def convert_batch_result_into_readable_form(batch_result):
-    batch_result = [json.loads(line) for line in batch_result.splitlines()]
     readable_batch_result = []
-    for each_batch_result in batch_result:
-        if each_batch_result['response']['status_code'] == 200:
-            each_final_answer = each_batch_result["response"]["body"]["choices"][0]["message"]["content"]
-        else:
-            each_final_answer = '요약 중 오류 발생'
-        readable_batch_result.append((each_batch_result['custom_id'], each_final_answer))
+    for each_item in batch_result:
+        summary = None
+        log = {'custom_id': each_item.custom_id, 'type': each_item.result.type}
+        if each_item.result.type == 'succeeded':
+            message = each_item.result.message
+            summary = extract_summary_text(message)
+            log.update(stop_reason=message.stop_reason, summary=summary, usage=message.usage.to_dict())
+        else:  # errored면 원인(이미지 URL 실패 등)을 남긴다
+            log['error'] = str(getattr(each_item.result, 'error', ''))[:300]
+        print(f'batch result: {json.dumps(log, ensure_ascii=False)}')
+        readable_batch_result.append((each_item.custom_id, summary if summary is not None else '요약 중 오류 발생'))
     return readable_batch_result
 
 
@@ -329,8 +288,8 @@ def start_batch():
     procedendum_trash_mail_list = get_not_processed_trash_mail_list()
     if not procedendum_trash_mail_list:
         return
-    jsonl_file_path = generate_batch_file_with_trash_mail_list(procedendum_trash_mail_list)
-    batch = start_processing_batch_file(jsonl_file_path)
+    batch_requests = [generate_each_line_of_batch_file(each_trash_mail) for each_trash_mail in procedendum_trash_mail_list]
+    batch = start_processing_batch_file(batch_requests)
     batch_id = batch.id
     update_processing_batch_list(batch_id)
     update_trash_email_json_file_with_batch_id(procedendum_trash_mail_list, batch_id)

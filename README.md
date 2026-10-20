@@ -4,7 +4,7 @@ Automated email management system for SNU (Seoul National University) Gmail acco
 
 ## Overview
 
-Emails are fetched via IMAP, classified using a logistic regression classifier with OpenAI embeddings, summarized with GPT models, and then processed with follow-up actions depending on the category: notifications, calendar events, Gmail reply drafts, and Todoist tasks.
+Emails are fetched via IMAP, classified using a logistic regression classifier with OpenAI embeddings, summarized with Claude models (Sonnet 5.5 for summaries, Opus 5.5 for event extraction and reply decisions), and then processed with follow-up actions depending on the category: notifications, calendar events, Gmail reply drafts, and Todoist tasks.
 
 ## Email Categories
 
@@ -40,27 +40,27 @@ Emails are fetched via IMAP, classified using a logistic regression classifier w
    - Extract events from concert/lab emails and add to CalDAV calendar
    - Generate Gmail reply drafts when a response is needed
    - Create Todoist tasks with category-based priority
-8. **Trash digest**: Batch-summarize trash emails via OpenAI Batch API, then send as a single digest email
+8. **Trash digest**: Batch-summarize trash emails via the Claude Message Batches API (Haiku 5.5), then send as a single digest email
 
 ## File Structure
 
 ```
 snu_mail/
 ├── main.py                    # Main entry point (classify, summarize, act)
-├── trash_mail_summarize.py    # Trash email batch summarization via OpenAI Batch API
+├── trash_mail_summarize.py    # Trash email batch summarization via Claude Message Batches API
 ├── check_db.py                # DB utility for viewing/deleting processing history
 ├── hash_update.py             # Bulk hash update script
 ├── constants.json             # Filtering keywords, priority rules, and other config
 ├── label_encoder.json         # Maps each model's English classes to Korean labels
 ├── logreg_model_all.json      # Logistic regression model for primary classification
 ├── logreg_model_lab.json      # Logistic regression model for lab sub-classification
-├── reply-style.xml            # Reply style examples for GPT-based reply generation
+├── reply-style.xml            # Reply style examples for Claude-based reply generation
 ├── lab-email-address          # Lab-related email address list
 ├── credentials.json           # Gmail OAuth client credentials
 ├── token.json                 # Gmail OAuth token
 ├── checked_items.db           # SQLite DB tracking processed emails
 ├── trash_can/                 # Temporary storage for trashed email JSON files
-├── jsonl_file_folder/         # JSONL files for OpenAI Batch API
+├── jsonl_file_folder/         # Legacy JSONL files from the former OpenAI Batch API (no longer written)
 ├── true_calendar/             # CalDAV calendar module (git submodule)
 ├── true_email/                # SMTP email sending module (git submodule)
 └── true_line/                 # LINE messaging module (git submodule)
@@ -78,7 +78,8 @@ snu_mail/
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY_EMAIL` | OpenAI API key (embeddings, summarization, extraction) |
+| `OPENAI_API_KEY_EMAIL` | OpenAI API key (classification embeddings only) |
+| `ANTHROPIC_API_KEY_EMAIL` | Anthropic API key (summaries, event extraction, reply decisions, trash digest) |
 | `SNU_GMAIL_EMAIL_ADDRESS` | SNU Gmail address for IMAP |
 | `SNU_GMAIL_PASSWORD` | SNU Gmail app password |
 | `TODOIST_API_TOKEN` | Todoist API token |
@@ -88,14 +89,14 @@ snu_mail/
 
 ## Key Dependencies
 
-- `openai` - Embeddings, summarization, event extraction, reply generation
+- `anthropic==1.15.0` - Claude summaries, event extraction, reply decisions, trash digest batches
+- `openai` - Classification embeddings
 - `numpy` - Email classification (logistic regression inference)
 - `xxhash` - Fast hashing for deduplication
 - `html2text` - HTML email body conversion
 - `todoist-api-python` - Todoist task management
 - `google-api-python-client`, `google-auth` - Gmail API (reply drafts)
 - `pydantic` - Structured output parsing
-- `jsonlines` - Batch API JSONL file generation
 - `python-dotenv` - Environment variable loading
 
 ## Usage
