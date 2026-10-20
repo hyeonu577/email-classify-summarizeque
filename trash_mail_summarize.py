@@ -2,6 +2,7 @@ import json
 import os
 import anthropic
 from true_email import true_email
+import email_images
 import re
 from pathlib import Path
 from dotenv import load_dotenv
@@ -11,6 +12,7 @@ load_dotenv()
 
 HAIKU_MODEL = 'claude-haiku-5-5'
 TRASH_MAX_TOKENS = 8000
+BATCH_BYTES_BUDGET = 200 * 1024 * 1024  # 배치 요청이 이 크기를 넘으면 남은 메일은 이미지 없이 보낸다. 배치 상한은 256MB
 
 
 def extract_name_and_email(text):
@@ -135,7 +137,7 @@ def extract_image_urls(text):
     return urls
 
 
-def generate_each_line_of_batch_file(email):  # 배치 요청 하나를 만드는 함수
+def generate_each_line_of_batch_file(email, attach_image=True):  # 배치 요청 하나를 만드는 함수
     system_message = '''이메일 본문을 분석하여 3문장 이하로 요약하세요. 각 문장은 번호를 매기세요. 모든 응답은 한국어로 작성하세요. 단, 전문 용어는 다른 언어를 사용해도 됩니다.
 
 # Steps
@@ -186,11 +188,9 @@ def generate_each_line_of_batch_file(email):  # 배치 요청 하나를 만드�
 - 정보를 정확히 요약하여 잘못된 해석이 없도록 주의하세요.
 - 사람 이름은 이메일에 적힌 표기 그대로 쓰세요. 이름을 한국어로 번역하거나 음역하지 마세요.'''
     message = f'제목: {email["subject"]}\n본문: {email["body"]}'
-    image_list = extract_image_urls(email['body'])
-    if image_list:
-        image_url = image_list[0]
-        final_user_message = [{"type": "text", "text": message},
-                              {"type": "image", "source": {"type": "url", "url": image_url}}]
+    image_blocks = email_images.image_blocks(extract_image_urls(email['body'])[:1]) if attach_image else []
+    if image_blocks:
+        final_user_message = [{"type": "text", "text": message}] + image_blocks
     else:
         final_user_message = message
     return {"custom_id": email['hash'],
@@ -292,7 +292,12 @@ def start_batch():
     procedendum_trash_mail_list = get_not_processed_trash_mail_list()
     if not procedendum_trash_mail_list:
         return
-    batch_requests = [generate_each_line_of_batch_file(each_trash_mail) for each_trash_mail in procedendum_trash_mail_list]
+    batch_requests = []
+    batch_bytes = 0
+    for each_trash_mail in procedendum_trash_mail_list:
+        batch_request = generate_each_line_of_batch_file(each_trash_mail, attach_image=batch_bytes < BATCH_BYTES_BUDGET)
+        batch_bytes += len(json.dumps(batch_request))
+        batch_requests.append(batch_request)
     batch = start_processing_batch_file(batch_requests)
     batch_id = batch.id
     update_processing_batch_list(batch_id)

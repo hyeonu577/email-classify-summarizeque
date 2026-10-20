@@ -18,6 +18,7 @@ import re
 import json
 import time
 import trash_mail_summarize
+import email_images
 import requests
 from todoist_api_python.api import TodoistAPI
 from pydantic import BaseModel, Field, ValidationError
@@ -487,8 +488,7 @@ Using the provided email details, summarize the content in three sentences or fe
     message = f'제목: {email_subject}\n본문: {email_content}'
     message = [{"type": "text", "text": message}]
     if img_urls:
-        for each_img_url in img_urls:
-            message.append({"type": "image", "source": {"type": "url", "url": each_img_url}})
+        message.extend(email_images.image_blocks(img_urls))
     try:
         return _claude_text(_SONNET_MODEL, system_message, message)
     except Exception as e:
