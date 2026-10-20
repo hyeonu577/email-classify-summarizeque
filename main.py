@@ -470,6 +470,7 @@ Using the provided email details, summarize the content in three sentences or fe
 # Output Format
 
 - Three sentences or fewer, each sentence numbered (1, 2, 3). Ensure clarity and focus on the key points from the email content.
+- Write people's names exactly as they appear in the email. Never translate or transliterate a name into Korean.
 
 # Examples
 
@@ -521,6 +522,7 @@ Summarize the email content provided in the input into Korean.
 3. Focus primarily on the most recent message in the thread.
 4. Use earlier messages only as context.
 5. Technical terms can remain in English/original language.
+6. Write people's names exactly as they appear in the email. Never translate or transliterate a name into Korean.
 
 **Output Format:**
 1. [Key point]
@@ -541,6 +543,7 @@ Summarize the provided email content into Korean.
 3. Each sentence must contain only one specific key point.
 4. Keep sentences concise, clear, and direct.
 5. Technical terms may remain in their original language if necessary.
+6. Write people's names exactly as they appear in the email. Never translate or transliterate a name into Korean.
 
 **Output Format:**
 1. [Key point 1]

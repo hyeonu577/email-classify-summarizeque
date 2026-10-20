@@ -42,6 +42,7 @@ Using the provided email details, summarize the content in three sentences or fe
 # Output Format
 
 - Three sentences or fewer, each sentence numbered (1, 2, 3). Ensure clarity and focus on the key points from the email content.
+- Write people's names exactly as they appear in the email. Never translate or transliterate a name into Korean.
 
 # Examples
 
@@ -182,7 +183,8 @@ def generate_each_line_of_batch_file(email):  # 배치 요청 하나를 만드�
 # Notes
 
 - 전문용어는 다른 언어를 사용할 수 있으니, 적절히 활용하세요.
-- 정보를 정확히 요약하여 잘못된 해석이 없도록 주의하세요.'''
+- 정보를 정확히 요약하여 잘못된 해석이 없도록 주의하세요.
+- 사람 이름은 이메일에 적힌 표기 그대로 쓰세요. 이름을 한국어로 번역하거나 음역하지 마세요.'''
     message = f'제목: {email["subject"]}\n본문: {email["body"]}'
     image_list = extract_image_urls(email['body'])
     if image_list:
