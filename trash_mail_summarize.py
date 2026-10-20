@@ -2,7 +2,10 @@ import json
 import os
 import anthropic
 from true_email import true_email
-import email_images
+try:
+    import email_images
+except ImportError:  # 상위 omnia main.py가 `from snu_mail import trash_mail_summarize`로 부를 때
+    from . import email_images
 import re
 from pathlib import Path
 from dotenv import load_dotenv
@@ -12,7 +15,7 @@ load_dotenv()
 
 HAIKU_MODEL = 'claude-haiku-5-5'
 TRASH_MAX_TOKENS = 8000
-BATCH_BYTES_BUDGET = 200 * 1024 * 1024  # 배치 요청이 이 크기를 넘으면 남은 메일은 이미지 없이 보낸다. 배치 상한은 256MB
+BATCH_BYTES_BUDGET = 50 * 1024 * 1024  # 배치 하나의 요청 크기 상한. 넘으면 배치를 나눈다. API 상한은 256MB지만 Pi 메모리(1.8GB)에 맞춘다
 
 
 def extract_name_and_email(text):
@@ -137,7 +140,7 @@ def extract_image_urls(text):
     return urls
 
 
-def generate_each_line_of_batch_file(email, attach_image=True):  # 배치 요청 하나를 만드는 함수
+def generate_each_line_of_batch_file(email):  # 배치 요청 하나를 만드는 함수
     system_message = '''이메일 본문을 분석하여 3문장 이하로 요약하세요. 각 문장은 번호를 매기세요. 모든 응답은 한국어로 작성하세요. 단, 전문 용어는 다른 언어를 사용해도 됩니다.
 
 # Steps
@@ -188,7 +191,7 @@ def generate_each_line_of_batch_file(email, attach_image=True):  # 배치 요청
 - 정보를 정확히 요약하여 잘못된 해석이 없도록 주의하세요.
 - 사람 이름은 이메일에 적힌 표기 그대로 쓰세요. 이름을 한국어로 번역하거나 음역하지 마세요.'''
     message = f'제목: {email["subject"]}\n본문: {email["body"]}'
-    image_blocks = email_images.image_blocks(extract_image_urls(email['body'])[:1]) if attach_image else []
+    image_blocks = email_images.image_blocks(extract_image_urls(email['body']), max_images=1)  # 받아지는 첫 이미지 한 장
     if image_blocks:
         final_user_message = [{"type": "text", "text": message}] + image_blocks
     else:
@@ -235,7 +238,7 @@ def convert_batch_result_into_readable_form(batch_result):
             message = each_item.result.message
             summary = extract_summary_text(message)
             log.update(stop_reason=message.stop_reason, summary=summary, usage=message.usage.to_dict())
-        else:  # errored면 원인(이미지 URL 실패 등)을 남긴다
+        else:  # errored면 원인(이미지 거부 등)을 남긴다
             log['error'] = str(getattr(each_item.result, 'error', ''))[:300]
         print(f'batch result: {json.dumps(log, ensure_ascii=False)}')
         readable_batch_result.append((each_item.custom_id, summary if summary is not None else '요약 중 오류 발생'))
@@ -288,20 +291,28 @@ def update_processing_batch_list(text_):
         f.close()
 
 
-def start_batch():
-    procedendum_trash_mail_list = get_not_processed_trash_mail_list()
-    if not procedendum_trash_mail_list:
-        return
-    batch_requests = []
-    batch_bytes = 0
-    for each_trash_mail in procedendum_trash_mail_list:
-        batch_request = generate_each_line_of_batch_file(each_trash_mail, attach_image=batch_bytes < BATCH_BYTES_BUDGET)
-        batch_bytes += len(json.dumps(batch_request))
-        batch_requests.append(batch_request)
+def submit_batch(trash_mail_list, batch_requests):
     batch = start_processing_batch_file(batch_requests)
     batch_id = batch.id
     update_processing_batch_list(batch_id)
-    update_trash_email_json_file_with_batch_id(procedendum_trash_mail_list, batch_id)
+    update_trash_email_json_file_with_batch_id(trash_mail_list, batch_id)
+
+
+def start_batch():  # 요청 크기 합계가 BATCH_BYTES_BUDGET을 넘지 않게 나눠서 배치를 만든다
+    procedendum_trash_mail_list = get_not_processed_trash_mail_list()
+    if not procedendum_trash_mail_list:
+        return
+    chunk_mail_list, chunk_requests, chunk_bytes = [], [], 0
+    for each_trash_mail in procedendum_trash_mail_list:
+        batch_request = generate_each_line_of_batch_file(each_trash_mail)
+        request_bytes = len(json.dumps(batch_request))
+        if chunk_requests and chunk_bytes + request_bytes > BATCH_BYTES_BUDGET:
+            submit_batch(chunk_mail_list, chunk_requests)
+            chunk_mail_list, chunk_requests, chunk_bytes = [], [], 0
+        chunk_mail_list.append(each_trash_mail)
+        chunk_requests.append(batch_request)
+        chunk_bytes += request_bytes
+    submit_batch(chunk_mail_list, chunk_requests)
 
 
 def get_trash_email_list_with_specific_batch_id(batch_id):

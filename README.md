@@ -33,7 +33,7 @@ Emails are fetched via IMAP, classified using a logistic regression classifier w
 3. **Rule-based filtering**: Skip or trash emails matching subject/sender/body keywords
 4. **ML classification**: Classify via OpenAI text embeddings + logistic regression
 5. **Additional checks**: Detect reply threads, lab emails, and user mentions
-6. **Summarization**: Apply category-specific summarization strategies (general / reply / lab)
+6. **Summarization**: Apply category-specific summarization strategies (general / reply / lab). Images in the body are downloaded on the Pi and sent to Claude as base64, because the SNU bulk-mail image server blocks Claude's URL fetcher
 7. **Follow-up actions**:
    - Forward summary to self via email
    - Send LINE notification for important emails
@@ -48,6 +48,8 @@ Emails are fetched via IMAP, classified using a logistic regression classifier w
 snu_mail/
 ├── main.py                    # Main entry point (classify, summarize, act)
 ├── trash_mail_summarize.py    # Trash email batch summarization via Claude Message Batches API
+├── email_images.py            # Downloads body images and builds Claude base64 image blocks
+├── tests/                     # unittest suite (run: python -m unittest discover -s tests -t .)
 ├── check_db.py                # DB utility for viewing/deleting processing history
 ├── hash_update.py             # Bulk hash update script
 ├── constants.json             # Filtering keywords, priority rules, and other config
@@ -98,6 +100,8 @@ snu_mail/
 - `google-api-python-client`, `google-auth` - Gmail API (reply drafts)
 - `pydantic` - Structured output parsing
 - `python-dotenv` - Environment variable loading
+- `requests` - Image downloads
+- `pillow` - Image type detection, validation, and resizing for Claude
 
 ## Usage
 

@@ -407,7 +407,7 @@ class ClaudeOutputError(Exception):
     """거절·잘림·빈 출력·스키마 불일치·요청 거부. 같은 입력으로 다시 호출해도 반복되기 쉬운 실패."""
 
 
-# 같은 요청을 다시 보내도 똑같이 실패하는 4xx(본문 과다, 스키마 거부, 이미지 URL 실패 등)
+# 같은 요청을 다시 보내도 똑같이 실패하는 4xx(본문 과다, 스키마 거부, 이미지 거부 등)
 _PERMANENT_REQUEST_ERRORS = (anthropic.BadRequestError, anthropic.RequestTooLargeError,
                              anthropic.UnprocessableEntityError)
 
@@ -492,7 +492,7 @@ Using the provided email details, summarize the content in three sentences or fe
     try:
         return _claude_text(_SONNET_MODEL, system_message, message)
     except Exception as e:
-        if img_urls:
+        if len(message) > 1:  # 이미지를 실었을 때만 이미지 없이 다시 요약한다
             return summarize_email(email_subject, email_content)
         logging.error(f"요약 중 에러 발생: {e}")
         return f"요약 중 에러 발생: {e}"
