@@ -487,18 +487,9 @@ Using the provided email details, summarize the content in three sentences or fe
     message = [{"type": "text", "text": message}]
     if img_urls:
         for each_img_url in img_urls:
-            message.append({"type": "image_url", "image_url": {"url": each_img_url}})
+            message.append({"type": "image", "source": {"type": "url", "url": each_img_url}})
     try:
-        chat_completion = _get_openai_client().chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": message}
-            ],
-            max_completion_tokens=500,
-            model="gpt-5.4-nano",
-            timeout=60.0,
-        )
-        return chat_completion.choices[0].message.content
+        return _claude_text(_SONNET_MODEL, system_message, message)
     except Exception as e:
         if img_urls:
             return summarize_email(email_subject, email_content)
@@ -512,23 +503,14 @@ def _summarize_with_reasoning(email_subject: str, email_content: str, instructio
         f"<email_content>\n{email_content}\n</email_content>"
     )
     try:
-        response = _get_openai_client().responses.create(
-            model="gpt-5.4-mini",
-            reasoning={"effort": "medium"},
-            instructions=instructions,
-            input=user_input,
-            timeout=60.0,
-        )
-        return response.output_text
+        return _claude_text(_SONNET_MODEL, instructions, user_input)
     except Exception as e:
         logging.error(f"요약 중 에러 발생: {e}")
         return f"요약 중 에러 발생: {e}"
 
 
 def summarize_reply_email(email_subject, email_content):
-    instructions = '''Formatting re-enabled
-
-You are an expert summary assistant.
+    instructions = '''You are an expert summary assistant.
 
 **Goal:**
 Summarize the email content provided in the input into Korean.
@@ -548,9 +530,7 @@ Summarize the email content provided in the input into Korean.
 
 
 def summarize_lab_email(email_subject, email_content):
-    instructions = '''Formatting re-enabled
-
-You are an expert summary assistant for laboratory-related emails.
+    instructions = '''You are an expert summary assistant for laboratory-related emails.
 
 **Goal:**
 Summarize the provided email content into Korean.
@@ -722,47 +702,34 @@ class ReplyDecision(BaseModel):
 def extract_event_info(email_subject: str, email_body: str):
     current_time_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_text = f"Subject: {email_subject}\nBody: {email_body}"
+    system_prompt = (
+        f"당신은 이메일을 통해 전달된 일정 정보를 추출하는 비서입니다. "
+        f"현재 시각은 {current_time_str}입니다. "
+        f"이메일 내용을 분석하여 이벤트 제목, 일시, 장소를 추출하세요. "
+        f"규칙: "
+        f"1. 시간대가 명시되지 않은 경우, 한국 표준시(KST, UTC+09:00)로 간주하세요. "
+        f"2. date_time은 반드시 타임존 오프셋(+09:00 등)이 포함된 형식이어야 합니다. "
+        f"3. 종료 일시가 명시되어 있지 않은 경우 시작 일시와 동일하게 작성하세요."
+        f"4. 이벤트 제목은 되도록 간결하게 작성하세요."
+        f"5. 하나의 이메일에 여러 일정이 있다면 모두 리스트에 담아 반환하세요. 단, 하나의 행사를 여러 일정으로 나누는 것을 지양하세요."
+        f"6. 현재 시각을 기준으로 이미 지난 일정은 무시하세요."
+        f"7. 일정을 전달하는 이메일이 아닌 경우 빈 리스트를 반환하세요. 단순한 이전 이메일의 대화 기록은 일정으로 간주하지 마세요."
+    )
 
     try:
-        response = _get_openai_client().responses.parse(
-            model="gpt-5.4-mini",
-            reasoning={"effort": "medium"},
-            input=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"당신은 이메일을 통해 전달된 일정 정보를 추출하는 비서입니다. "
-                        f"현재 시각은 {current_time_str}입니다. "
-                        f"이메일 내용을 분석하여 이벤트 제목, 일시, 장소를 추출하세요. "
-                        f"규칙: "
-                        f"1. 시간대가 명시되지 않은 경우, 한국 표준시(KST, UTC+09:00)로 간주하세요. "
-                        f"2. date_time은 반드시 타임존 오프셋(+09:00 등)이 포함된 형식이어야 합니다. "
-                        f"3. 종료 일시가 명시되어 있지 않은 경우 시작 일시와 동일하게 작성하세요."
-                        f"4. 이벤트 제목은 되도록 간결하게 작성하세요."
-                        f"5. 하나의 이메일에 여러 일정이 있다면 모두 리스트에 담아 반환하세요. 단, 하나의 행사를 여러 일정으로 나누는 것을 지양하세요."
-                        f"6. 현재 시각을 기준으로 이미 지난 일정은 무시하세요."
-                        f"7. 일정을 전달하는 이메일이 아닌 경우 빈 리스트를 반환하세요. 단순한 이전 이메일의 대화 기록은 일정으로 간주하지 마세요."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": full_text
-                },
-            ],
-            text_format=EventExtraction,
-            timeout=60.0,
-        )
-
-        result: EventExtraction = response.output_parsed
-        if not result.events:
-            logging.info("이메일에서 이벤트 정보를 찾을 수 없습니다")
-            return []
-        logging.info('일정 추출 완료')
-        return result.events
-
+        result: EventExtraction = _claude_parse(_OPUS_MODEL, system_prompt, full_text, EventExtraction)
+    except ClaudeOutputError as e:
+        logging.warning(f"일정 추출 응답 오류, 일정 없음으로 처리: {e}")
+        return []
     except Exception as e:
         logging.error(f"시스템 오류 발생: {e}")
         raise
+
+    if not result.events:
+        logging.info("이메일에서 이벤트 정보를 찾을 수 없습니다")
+        return []
+    logging.info('일정 추출 완료')
+    return result.events
 
 
 def check_event_duplication(event):
@@ -788,16 +755,11 @@ def check_event_duplication(event):
         )
         user_input = f"--- 새로운 일정 ---\n{new_event_info}\n\n--- 기존 일정 목록 ---\n{existing_events_info}"
 
-        response = _get_openai_client().responses.parse(
-            model="gpt-5.4-mini",
-            reasoning={"effort": "medium"},
-            instructions=instructions,
-            input=user_input,
-            text_format=EventDuplicationCheck,
-            timeout=60.0,
-        )
-
-        result = response.output_parsed
+        try:
+            result = _claude_parse(_OPUS_MODEL, instructions, user_input, EventDuplicationCheck)
+        except ClaudeOutputError as e:
+            logging.warning(f"[중복 검사] 응답 오류, 중복 아님으로 처리: {e}")
+            return False
         logging.info(f"[중복 검사] 중복 여부: {result.is_duplicate}, 이유: {result.reason}")
         return result.is_duplicate
 
@@ -860,7 +822,7 @@ def _handle_reply(email_, header, sender, summary, due_date) -> bool:
     if not reply_email.is_reply_needed:
         return False
 
-    if GENERATE_REPLY_DRAFTS:
+    if GENERATE_REPLY_DRAFTS and isinstance(reply_email, ReplyDecision):
         cc = list(email_['receiver'])
         cc.append(email_['sender'])
         cc = [extract_name_and_email(each_address)[2] for each_address in cc
@@ -1088,22 +1050,16 @@ def generate_email_reply(given_email):
         text_format = ReplyCheck
 
     try:
-        response = _get_openai_client().responses.parse(
-            model="gpt-5.4-mini",
-            reasoning={"effort": "medium"},
-            instructions=instructions,
-            input=full_context,
-            text_format=text_format,
-            timeout=90.0,
-        )
-
-        result = response.output_parsed
-        logging.info(f"답장 필요: {result.is_reply_needed} / 이유: {result.reason}")
-        return result
-
+        result = _claude_parse(_OPUS_MODEL, instructions, full_context, text_format)
+    except ClaudeOutputError as e:
+        logging.warning(f"답장 판단 응답 오류, 답장 필요로 처리: {e}")
+        return ReplyCheck(is_reply_needed=True, reason="답장 판단 실패 (Claude 응답 오류)")
     except Exception as e:
         logging.error(f"시스템 오류 발생: {e}")
         raise
+
+    logging.info(f"답장 필요: {result.is_reply_needed} / 이유: {result.reason}")
+    return result
 
 
 # Initialise DB once at module load
